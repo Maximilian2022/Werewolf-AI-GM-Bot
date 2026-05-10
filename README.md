@@ -25,7 +25,7 @@ Discordのボイスチャンネル上で動作する、完全フルボイス進�
 
 ### 1. リポジトリのクローン
 ```bash
-git clone [https://github.com/yourusername/werewolf-gm-bot.git](https://github.com/yourusername/werewolf-gm-bot.git)
+git clone https://github.com/yourusername/werewolf-gm-bot.git
 cd werewolf-gm-bot
 ```
 
