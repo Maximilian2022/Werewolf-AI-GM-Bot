@@ -30,7 +30,7 @@ cd werewolf-gm-bot
 ```
 
 ### 2. 環境変数の設定
-ディレクトリのルートに .env ファイルを作成し、各種キーを設定します。コード スニペット
+ディレクトリのルートに .env ファイルを作成し、各種キーを設定します。
 # Discord Bot Tokens
 ```bash
 GM_BOT_TOKEN="your_main_gm_bot_token"
