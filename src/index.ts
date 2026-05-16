@@ -1,147 +1,324 @@
 /**
  * src/index.ts
- * フルコード版：新コマンドの同期 ＆ GUIルーティング対応
+ * メインエントリーポイント（完全版：自動お掃除＆プルダウン設定対応）
  */
-import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, MessageFlags} from 'discord.js';
 import * as dotenv from 'dotenv';
-import * as dns from 'dns';
+import { CommandHandler } from './handlers/CommandHandler.js';
+import { WorkerManager } from './managers/WorkerManager.js';
+import { SettingsManager } from './managers/SettingsManager.js';
+import { CleanupService } from './services/CleanupService.js';
+import { Logger } from './utils/logger.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { execSync } from 'node:child_process'; // 🚨 追加：npmバージョン取得用
 
-import { StateManager } from './state/StateManager';
-import { ActionQueue } from './state/ActionQueue';
-import { CommandHandler } from './handlers/CommandHandler';
-import { WorkerManager } from './managers/WorkerManager';
-import { VCWatcher } from './managers/VCWatcher';
-import { Logger } from './utils/logger';
-
-// Node.jsのDNS解決をIPv4優先にする（通信安定化のため）
-dns.setDefaultResultOrder('ipv4first');
+// .envファイルの読み込み
 dotenv.config();
 
-const intents = [
-  GatewayIntentBits.Guilds,
-  GatewayIntentBits.GuildVoiceStates,
-  GatewayIntentBits.GuildMembers,
+const GM_BOT_TOKEN = process.env.GM_BOT_TOKEN;
+const GM_CLIENT_ID = process.env.GM_CLIENT_ID;
+const ASSISTANT_BOT_TOKEN = process.env.ASSISTANT_BOT_TOKEN;
+const TEST_GUILD_ID = process.env.TEST_GUILD_ID;
+
+if (!GM_BOT_TOKEN || !GM_CLIENT_ID || !ASSISTANT_BOT_TOKEN || !TEST_GUILD_ID) {
+  Logger.error('System', '❌ 必須の環境変数が設定されていません（.envファイルを確認してください）。');
+  process.exit(1);
+}
+
+// クライアントの初期化 (必要なインテントを付与)
+const gmClient = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+const assistantClient = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+  ],
+});
+
+// 👇 🚨 ここから追加：Discord APIのレートリミット（待機命令）を可視化する
+gmClient.rest.on('rateLimited', (info) => {
+  Logger.warn('System', `Discord API 制限検知: スパム対策のため ${info.timeToReset}ms 待機します (${info.route})`);
+});
+assistantClient.rest.on('rateLimited', (info) => {
+  Logger.warn('System', `Discord API 制限検知(Assistant): ${info.timeToReset}ms 待機します`);
+});
+
+// スラッシュコマンドの定義
+const commands = [
+  {
+    name: '開始',
+    description: '人狼ゲームを開始し、隔離環境を構築します',
+    options: [
+      {
+        name: '人数',
+        type: 4, // Integer
+        description: '参加人数（11または13）',
+        required: true,
+      },
+      {
+        name: 'debug',
+        type: 5, // Boolean
+        description: 'デバッグモード（高速進行＆バイトBot召喚）で起動するかどうか',
+        required: false,
+      }
+    ],
+  },
+  {
+    name: '再開',
+    description: '中断されたゲームを再開します',
+    options: [
+      {
+        name: 'ゲームid',
+        type: 3, // String
+        description: '再開するゲームのID',
+        required: true,
+      }
+    ],
+  },
+  {
+    name: '廃村',
+    description: '指定したゲームの隔離環境とセーブデータを強制削除します',
+    options: [
+      {
+        name: 'ゲームid',
+        type: 3, // String
+        description: '廃村にするゲームのID',
+        required: true,
+      }
+    ],
+  },
+  {
+    name: '観戦',
+    description: '進行中のゲームに霊界から途中参加（観戦）します',
+  },
+  {
+    name: '設定',
+    description: 'ゲームの議論時間やAIモデル、GMの音声を変更します',
+  },
+  {
+    name: '再解析',
+    description: '終了したゲームの録音データからMVPを再解析します',
+    options: [
+      {
+        name: 'ゲームid',
+        type: 3, // String
+        description: '再解析するゲームのID',
+        required: true,
+      }
+    ],
+  },
+  {
+    name: 'ミュート解除',
+    description: '【緊急用】バグ等で全員がミュートされたままになった場合、強制解除します',
+  },
+  // 🚨 以下の2つを追加
+  {
+    name: 'テスト',
+    description: '【開発用】音声中継をテストします',
+    options: [{ name: '送信先vc', type: 7, description: 'アシスタントが接続する聞き手側のVC', required: true }],
+  },
+  { name: 'テスト終了', description: '【開発用】中継テストを終了しBotを退出させます' }
 ];
 
-const gmClient = new Client({ intents });
-const assistantClient = new Client({ intents });
-
-StateManager.getInstance();
-ActionQueue.getInstance();
-
-async function syncCommands(token: string, clientId: string) {
-  const guildId = process.env.TEST_GUILD_ID || '1502707892485099623'; 
-  
-  // 🚨 修正: ここに観戦と設定を追加し、起動時の上書き消去を防ぐ
-  const commands = [
-    new SlashCommandBuilder().setName('開始').setDescription('人狼ゲームの環境を構築し、ゲームを開始します')
-      .addBooleanOption(o => o.setName('debug').setDescription('デバッグモードで起動').setRequired(false))
-      .addIntegerOption(o => o.setName('人数').setDescription('【Debug用】合計参加人数を指定').setChoices({ name: '11人村', value: 11 }, { name: '13人村', value: 13 }).setRequired(false)),
-    new SlashCommandBuilder().setName('再開').setDescription('中断されたゲームをセーブデータから再開します')
-      .addStringOption(o => o.setName('ゲームid').setDescription('再開するゲームのIDを指定してください').setRequired(true)),
-    new SlashCommandBuilder().setName('ミュート解除').setDescription('【緊急用】全員のサーバーミュートを強制解除します'),
-    new SlashCommandBuilder().setName('廃村').setDescription('【管理者用】指定したゲームIDの村を強制的に削除します')
-      .addStringOption(o => o.setName('ゲームid').setDescription('削除するゲームのIDを指定してください').setRequired(true)),
-    new SlashCommandBuilder().setName('再解析').setDescription('【管理者用】終了したゲームの録音データから、MVP解析のみをやり直します')
-      .addStringOption(o => o.setName('ゲームid').setDescription('解析をやり直すゲームのIDを指定してください').setRequired(true)),
-    new SlashCommandBuilder().setName('観戦').setDescription('現在進行中のゲームに観戦者（霊界）として途中参加します'),
-    new SlashCommandBuilder().setName('設定').setDescription('【管理者用】ゲームの制限時間などを設定します')
-  ].map(command => command.toJSON());
-
-  const rest = new REST({ version: '10' }).setToken(token);
-
+// コマンドの登録処理
+async function registerCommands() {
+  const rest = new REST({ version: '10' }).setToken(GM_BOT_TOKEN!);
   try {
-    Logger.info('Index', `🔄 テストサーバー [${guildId}] へスラッシュコマンドを同期しています...`);
-    await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
-    Logger.success('Index', '✅ スラッシュコマンドの同期が完了しました。');
+    Logger.info('System', '🔄 スラッシュコマンドを登録しています...');
+    await rest.put(
+      Routes.applicationGuildCommands(GM_CLIENT_ID!, TEST_GUILD_ID!),
+      { body: commands }
+    );
+    Logger.success('System', '✅ スラッシュコマンドの登録が完了しました。');
   } catch (error) {
-    Logger.error('Index', '❌ コマンドの同期中にエラーが発生しました', error);
+    Logger.error('System', '❌ スラッシュコマンドの登録に失敗しました:', error);
   }
 }
 
-async function bootstrap() {
-  Logger.system('アプリケーションの起動シーケンスを開始します...');
+// イベントリスナーの登録
+gmClient.on('clientReady', () => {
+  Logger.success('System', `🐺 GM Botがログインしました: ${gmClient.user?.tag}`);
+});
 
-  gmClient.once(Events.ClientReady, async (c) => {
-    Logger.success('Index', `[GM Bot] Ready! Logged in as ${c.user.tag}`);
-    if (process.env.GM_BOT_TOKEN && process.env.GM_CLIENT_ID) {
-      await syncCommands(process.env.GM_BOT_TOKEN, process.env.GM_CLIENT_ID);
+assistantClient.on('clientReady', () => {
+  Logger.success('System', `👻 Assistant Botがログインしました: ${assistantClient.user?.tag}`);
+});
+gmClient.on('interactionCreate', async (interaction) => {
+  try {
+    if (interaction.isChatInputCommand()) {
+      switch (interaction.commandName) {
+        case '開始': await CommandHandler.handleStart(interaction, gmClient, assistantClient); break;
+        case '再開': await CommandHandler.handleResume(interaction, gmClient, assistantClient); break;
+        case '廃村': await CommandHandler.handleAbandon(interaction); break;
+        case '観戦': await CommandHandler.handleSpectate(interaction); break;
+        case '設定': await CommandHandler.handleSettings(interaction); break;
+        case '再解析': await CommandHandler.handleReanalyze(interaction); break;
+        case 'ミュート解除': await CommandHandler.handleEmergencyUnmute(interaction); break;
+        case '中断': await CommandHandler.handlePause(interaction); break;
+        case '中断解除': await CommandHandler.handleUnpause(interaction); break;
+        case 'テスト': await CommandHandler.handleMixerTest(interaction, gmClient, assistantClient); break;
+        case 'テスト終了': await CommandHandler.handleRelayTestEnd(interaction); break;      
+      }
+    } 
+    else if (interaction.isButton()) {
+        // 🚨 修正：設定ボタンのIDだった時 "だけ" モーダルを開くようにする
+        if (interaction.customId === 'settings_btn') { 
+          await CommandHandler.handleSettingsButton(interaction);
+        }
+      } 
+    else if (interaction.isModalSubmit()) {
+      await CommandHandler.handleSettingsModal(interaction);
+    } 
+    else if (interaction.isStringSelectMenu()) {
+      // 🚨 修正: カスタムIDが 'settings_' から始まるものだけを設定ハンドラに流す
+      // 投票(v)や襲撃(w)などのメニューはPhaseHandler内のawaitMessageComponentで直接処理されるため、ここでは無視する
+      if (interaction.customId.startsWith('settings_')) {
+        await CommandHandler.handleSettingsSelect(interaction);
+      }
     }
-  });
-
-  assistantClient.once(Events.ClientReady, (c) => {
-    Logger.success('Index', `[Assistant Bot] Ready! Logged in as ${c.user.tag}`);
-  });
-
-  gmClient.on(Events.InteractionCreate, async (interaction) => {
+  } catch (error) {
+    Logger.error('System', '❌ インタラクション処理中にエラーが発生しました', error);
     try {
-      if (interaction.isChatInputCommand()) {
-        Logger.info('Index', `コマンド実行: [/${interaction.commandName}]`);
-        if (interaction.commandName === '開始') await CommandHandler.handleStart(interaction, gmClient, assistantClient);
-        else if (interaction.commandName === '再開') await CommandHandler.handleResume(interaction, gmClient, assistantClient);
-        else if (interaction.commandName === 'ミュート解除') await CommandHandler.handleEmergencyUnmute(interaction);
-        else if (interaction.commandName === '廃村') await CommandHandler.handleAbandon(interaction);
-        else if (interaction.commandName === '再解析') await CommandHandler.handleReanalyze(interaction);
-        else if (interaction.commandName === '観戦') await CommandHandler.handleSpectate(interaction);
-        else if (interaction.commandName === '設定') await CommandHandler.handleSettings(interaction);
-      } 
-      else if (interaction.isButton()) {
-        if (interaction.customId.startsWith('settings_')) await CommandHandler.handleSettingsButton(interaction);
-      } 
-      else if (interaction.isModalSubmit()) {
-        if (interaction.customId.startsWith('modal_settings_')) await CommandHandler.handleSettingsModal(interaction);
+      if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: '❌ エラーが発生しました。', flags: MessageFlags.Ephemeral });
+      } else if (interaction.isRepliable() && (interaction.replied || interaction.deferred)) {
+        await interaction.followUp({ content: '❌ エラーが発生しました。', flags: MessageFlags.Ephemeral });
       }
-    } catch (error) {
-      Logger.error('Index', `インタラクション処理エラー`, error);
+    } catch (e) {
+      // 無視
     }
-  });
+  }
+});
+// 未キャッチの例外でプロセスが落ちるのを防ぐ (引数の数を修正)
+process.on('unhandledRejection', (reason, promise) => {
+  Logger.warn('System', `Unhandled Rejection at: ${promise}, reason: ${reason}`);
+});
+process.on('uncaughtException', (error) => {
+  Logger.error('System', `Uncaught Exception: ${error}`);
+});
 
-  process.on('SIGINT', handleShutdown);
-  process.on('SIGTERM', handleShutdown);
-
+// ===============================================
+// 🚀 システム環境 ＆ 実インストール済みパッケージレポート
+// ===============================================
+function generateEnvironmentReport(): string {
   try {
-    const gmToken = process.env.GM_BOT_TOKEN;
-    const assistantToken = process.env.ASSISTANT_BOT_TOKEN;
-
-    if (!gmToken || !assistantToken) throw new Error('環境変数に Bot Token が設定されていません。');
-
-    Logger.info('Index', 'Discord APIへのログインを試行しています...');
+    let report = '\n=== 🚀 Environment & Dependencies Report ===\n';
     
-    const loginPromises: Promise<any>[] = [gmClient.login(gmToken), assistantClient.login(assistantToken)];
-    const workerTokensStr = process.env.WORKER_TOKENS;
-
-    if (workerTokensStr) {
-      const workerTokens = workerTokensStr.split(',').map(t => t.trim()).filter(t => t.length > 0);
-      if (workerTokens.length > 0) {
-        loginPromises.push(WorkerManager.getInstance().init(workerTokens));
-      } else {
-        Logger.info('Index', 'WORKER_TOKENSは空です。バイトBotなしで起動します。');
-      }
+    // 1. Node.js と NPM のバージョンを取得
+    report += '【System Environment】\n';
+    report += `- Node.js : ${process.version}\n`;
+    try {
+      // コンテナ内のnpmバージョンをコマンドで直接取得
+      const npmVersion = execSync('npm -v').toString().trim();
+      report += `- NPM     : v${npmVersion}\n`;
+    } catch (e) {
+      report += `- NPM     : Unknown\n`;
     }
 
-    await Promise.all(loginPromises);
-    Logger.system('全てのBotクライアントが正常に起動しました。待機状態に入ります。');
+    report += '\n【Installed Packages】\n';
+    
+    // 2. package.jsonからパッケージ名のリストを取得
+    const appPkgPath = path.join(process.cwd(), 'package.json');
+    if (!fs.existsSync(appPkgPath)) return report += '❌ package.json is missing.\n============================================';
+    
+    const appPkg = JSON.parse(fs.readFileSync(appPkgPath, 'utf-8'));
+    // 本番用と開発用のパッケージをすべて合体させる
+    const allDeps = { ...(appPkg.dependencies || {}), ...(appPkg.devDependencies || {}) };
+    const depNames = Object.keys(allDeps);
+    
+    if (depNames.length > 0) {
+      const maxNameLength = Math.max(...depNames.map(name => name.length));
+      
+      // 3. node_modulesの中を直接見に行って確定バージョンを読み取る
+      for (const name of depNames) {
+        try {
+          const modulePkgPath = path.join(process.cwd(), 'node_modules', name, 'package.json');
+          if (fs.existsSync(modulePkgPath)) {
+            const modulePkg = JSON.parse(fs.readFileSync(modulePkgPath, 'utf-8'));
+            report += `- ${name.padEnd(maxNameLength, ' ')} : v${modulePkg.version}\n`;
+          } else {
+            report += `- ${name.padEnd(maxNameLength, ' ')} : Not Installed (Missing)\n`;
+          }
+        } catch (e) {
+          report += `- ${name.padEnd(maxNameLength, ' ')} : Error reading version\n`;
+        }
+      }
+    } else {
+      report += 'No dependencies found.\n';
+    }
 
+    report += '=============================================\n';
+    return report;
   } catch (error) {
-    Logger.error('Index', '起動シーケンス中に致命的なエラーが発生しました', error);
-    process.exit(1);
+    return `\n=== 🚀 Environment & Dependencies Report ===\n❌ Failed to generate report\n=============================================`;
   }
 }
 
-function handleShutdown() {
-  Logger.system('終了シグナルを受信しました。安全にシャットダウンします...');
-  try {
-    VCWatcher.getInstance().stop();
-    gmClient.destroy();
-    assistantClient.destroy();
-    WorkerManager.getInstance().destroyAll(); 
-    Logger.system('クライアントを破棄しました。プロセスを終了します。');
-    process.exit(0);
-  } catch (error) {
-    Logger.error('Index', 'シャットダウン中にエラーが発生しました', error);
-    process.exit(1);
+// 起動処理（Bootstrap）
+async function bootstrap() {
+  Logger.info('System', '🚀 システムを起動しています...');
+  // 👇 ここに追加：実際にインストールされている確定バージョンを出力
+  Logger.system(generateEnvironmentReport());
+  // 1. 設定のロード
+  SettingsManager.getInstance().load();
+
+  // 2. お掃除サービスの実行 (1週間経過したデータの自動削除)
+  CleanupService.run();
+
+// 🚨 3. バイト（Worker）Botの初期化とログイン
+  const workerTokens = process.env.WORKER_TOKENS ? process.env.WORKER_TOKENS.split(',') : [];
+  if (workerTokens.length > 0) {
+    await WorkerManager.getInstance().init(workerTokens);
+
+    // 👇 ここから追加：ログイン直後に全員のニックネームを初期化する
+    const workers = WorkerManager.getInstance().getWorkers();
+    await Promise.all(workers.map(async (worker, index) => {
+      try {
+        const guild = await worker.guilds.fetch(TEST_GUILD_ID!).catch(()=>null);
+        if (guild && guild.members.me) {
+          const num = String(index + 1).padStart(2, '0');
+          // 自分自身でニックネームを変更する（API制限回避）
+          await guild.members.me.setNickname(`人狼ゲームスタッフ${num}`).catch(()=>{});
+        }
+      } catch(e) {}
+    }));
+    Logger.info('System', '✅ バイトBotのニックネームを [スタッフ01〜] に初期化しました。');
+    // 👆 ここまで追加
+
+  } else {
+    Logger.warn('System', '⚠️ .envにWORKER_TOKENSが設定されていません。バイトBotなしで起動します。');
   }
+  
+  // 4. アシスタントBotのログイン
+  await assistantClient.login(ASSISTANT_BOT_TOKEN);
+
+  // 5. GM Botのログイン
+  await gmClient.login(GM_BOT_TOKEN);
+
+  // 6. コマンド登録
+  await registerCommands();
 }
 
-process.on('unhandledRejection', error => { Logger.error('System', 'Unhandled promise rejection:', error); });
+
+// ===============================================
+// Docker環境用のグレースフルシャットダウン処理
+// ===============================================
+process.on('SIGTERM', () => {
+  Logger.info('System', '🛑 SIGTERMシグナルを受信しました。プロファイルを保存して終了します...');
+  process.exit(0); // 正常終了することで、.cpuprofile が安全に書き出されます
+});
+
+process.on('SIGINT', () => {
+  Logger.info('System', '🛑 SIGINTシグナルを受信しました。プロファイルを保存して終了します...');
+  process.exit(0);
+});
+// 実行
 bootstrap();

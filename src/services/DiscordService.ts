@@ -1,12 +1,12 @@
 // @ts-nocheck
 /**
  * src/services/DiscordService.ts
- * 観戦者権限対応版
+ * 命名規則の見直し（GameID付与） ＆ クリーンアップ対応版
  */
 import { ChannelType, Guild, GuildMember, PermissionsBitField, OverwriteType, TextChannel, CategoryChannel } from 'discord.js';
-import { Logger } from '../utils/logger';
-import { GameEnvironment } from '../types';
-import { WorkerManager } from '../managers/WorkerManager';
+import { Logger } from '../utils/logger.js';
+import { GameEnvironment } from '../types.js';
+import { WorkerManager } from '../managers/WorkerManager.js';
 
 export class DiscordService {
   public static async cleanupAllLegacyResources(guild: Guild): Promise<void> {
@@ -18,11 +18,15 @@ export class DiscordService {
     const category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.includes(`[${gameId}]`)) as CategoryChannel;
     if (category) {
         const children = guild.channels.cache.filter(c => c.parentId === category.id);
-        for (const child of children.values()) await child.delete().catch(() => {});
+        for (const child of children.values()) {
+            await child.delete().catch(() => {});
+        }
         await category.delete().catch(() => {});
     }
     const roles = guild.roles.cache.filter(r => r.name.includes(gameId));
-    for (const role of roles.values()) await role.delete().catch(() => {});
+    for (const role of roles.values()) {
+        await role.delete().catch(() => {});
+    }
     Logger.success('DiscordService', `✅ [${gameId}] 抹消完了。`);
   }
 
@@ -40,19 +44,26 @@ export class DiscordService {
         await channel.setName(`試合結果-${gameId}-${date}`);
         await channel.setParent(archiveCategory.id, { lockPermissions: false });
         
-        Logger.info('DiscordService', `📦 [${gameId}] をアーカイブ化しました。`);
+        await channel.permissionOverwrites.set([
+          {
+            id: guild.roles.everyone.id,
+            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.ReadMessageHistory],
+            deny: [PermissionsBitField.Flags.SendMessages]
+          }
+        ]);
+        
+        Logger.info('DiscordService', `📦 [${gameId}] をアーカイブ化し、全員に公開しました。`);
     } catch (e) {
         Logger.error('DiscordService', 'アーカイブ化エラー', e);
     }
   }
 
-  /**
-   * 🚨 修正: spectators（観戦者配列）を受け取り、霊界へのアクセス権を付与する
-   */
-  public static async setupGameEnvironment(
-    guild: Guild, gameId: string, members: GuildMember[], spectators: GuildMember[], gmBotId: string, assistantBotId: string 
+public static async setupGameEnvironment(
+    guild: Guild, gameId: string, members: GuildMember[], spectators: GuildMember[], 
+    gmBotId: string, assistantBotId: string,
+    onProgress?: (current: number, total: number) => Promise<void> // 👈 これを追加
   ): Promise<GameEnvironment> {
-    const env: GameEnvironment = { commonRoleId: '', categoryId: '', mainVcId: '', wolfVcId: '', ghostVcId: '', voteChannelId: '', playerEnvs: [] };
+    const env: GameEnvironment = { commonRoleId: '', categoryId: '', mainVcId: '', wolfVcId: '', ghostVcId: '', voteChannelId: '', wolfTextChannelId: '', playerEnvs: [] };
     const workerManager = WorkerManager.getInstance();
     const workerIds = workerManager.getWorkers().map(w => w.user?.id).filter(id => id);
 
@@ -67,43 +78,102 @@ export class DiscordService {
       ...workerIds.map(id => ({ id, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }))
     ];
 
+    const wolfOnlyOverwrites = [
+      { id: guild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect] },
+      { id: gmBotId, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] },
+      { id: assistantBotId, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] },
+      ...workerIds.map(id => ({ id, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak] }))
+    ];
+
     const category = await guild.channels.create({ name: `🐺 人狼村 [${gameId}]`, type: ChannelType.GuildCategory, permissionOverwrites: baseOverwrites });
     env.categoryId = category.id;
 
-    // 観戦者用の「表示・接続・発言」許可権限オブジェクト
+    // 🚨 修正：チャンネル名にGameIDを付与
+    const wolfTextCh = await guild.channels.create({
+      name: `人狼内通ログ-${gameId}`,
+      type: ChannelType.GuildText,
+      parent: env.categoryId,
+      permissionOverwrites: wolfOnlyOverwrites 
+    });
+    env.wolfTextChannelId = wolfTextCh.id;
+
     const spectatorOverwrites = spectators.map(s => ({
         id: s.id, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak]
     }));
 
     const commonPromises = [
-      { name: '全体議論', type: ChannelType.GuildVoice, key: 'mainVcId', isGhost: false },
-      { name: '人狼内通', type: ChannelType.GuildVoice, key: 'wolfVcId', isGhost: false },
-      { name: '霊界', type: ChannelType.GuildVoice, key: 'ghostVcId', isGhost: true },
-      { name: '投票所', type: ChannelType.GuildText, key: 'voteChannelId', isGhost: false }
+      { name: '全体議論', type: ChannelType.GuildVoice, key: 'mainVcId', isGhost: false, isWolf: false },
+      { name: '人狼内通', type: ChannelType.GuildVoice, key: 'wolfVcId', isGhost: false, isWolf: true },
+      { name: '霊界', type: ChannelType.GuildVoice, key: 'ghostVcId', isGhost: true, isWolf: false },
+      { name: '投票所', type: ChannelType.GuildText, key: 'voteChannelId', isGhost: false, isWolf: false }
     ].map(async (ch) => {
-      // 霊界のみ、観戦者の権限設定を合体させる
-      const channelOverwrites = ch.isGhost ? [...baseOverwrites, ...spectatorOverwrites] : undefined;
+      let channelOverwrites = baseOverwrites;
+      if (ch.isGhost) channelOverwrites = [...baseOverwrites, ...spectatorOverwrites];
+      if (ch.isWolf) channelOverwrites = wolfOnlyOverwrites; 
+
+      if (ch.key === 'voteChannelId') {
+        channelOverwrites = [
+          { id: guild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: role.id, type: OverwriteType.Role, allow: [PermissionsBitField.Flags.ViewChannel], deny: [PermissionsBitField.Flags.SendMessages] },
+          { id: gmBotId, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: assistantBotId, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ];
+      }
+
       const created = await guild.channels.create({ 
           name: ch.name, type: ch.type, parent: env.categoryId, permissionOverwrites: channelOverwrites 
       });
-      env[ch.key] = created.id;
+      (env as any)[ch.key] = created.id;
     });
     await Promise.all(commonPromises);
 
-    const playerSetupPromises = members.map(async (member, index) => {
+    let lastUpdateTime = Date.now(); // ⏱️ 時間計測用
+// 🟢 修正後：forループで1人ずつ順番に作成（レートリミット回避＆個人ロール廃止）
+    for (let index = 0; index < members.length; index++) {
+      const member = members[index];
       const playerNum = index + 1;
-      const pRole = await guild.roles.create({ name: `${gameId}-${playerNum}` });
+
+      // 🚨 Discord APIを怒らせないため、待機時間を300msから「1秒」に引き上げ
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // ⏱️ もし前回の更新から 10,000ミリ秒（10秒）以上経過していたら進捗を報告
+      if (onProgress && Date.now() - lastUpdateTime >= 10000) {
+        await onProgress(playerNum, members.length).catch(() => {});
+        lastUpdateTime = Date.now(); // 最終更新時間をリセット
+      }
+      // ❌ 個人ロールの作成を廃止（APIリクエスト削減）
+      // const pRole = await guild.roles.create({ name: `${gameId}-${playerNum}` });
+      
       const pVc = await guild.channels.create({
         name: `待機用VC${playerNum}`, type: ChannelType.GuildVoice, parent: env.categoryId,
         permissionOverwrites: [
           { id: guild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect] },
-          { id: pRole.id, type: OverwriteType.Role, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect] }
+          { id: member.id, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect] } // 🚨 個人ロールではなくユーザーIDを直接指定
         ]
       });
-      await member.roles.add([env.commonRoleId, pRole.id]);
-      env.playerEnvs.push({ userId: member.id, waitVcId: pVc.id, personalRoleId: pRole.id });
-    });
-    await Promise.all(playerSetupPromises);
+
+      const pText = await guild.channels.create({
+        name: `📝-${member.displayName}-${gameId}`, 
+        type: ChannelType.GuildText, 
+        parent: env.categoryId,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, type: OverwriteType.Role, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: member.id, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
+          { id: gmBotId, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: assistantBotId, type: OverwriteType.Member, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ]
+      });
+
+      // 🚨 共通ロールのみ付与する
+      await member.roles.add(env.commonRoleId);
+
+      env.playerEnvs.push({ 
+        userId: member.id, 
+        waitVcId: pVc.id, 
+        personalRoleId: '', // 🚨 空文字にしておく（廃村処理でもエラーにならず後方互換性を保ちます）
+        personalTextChannelId: pText.id 
+      });
+    }
     return env;
   }
 }

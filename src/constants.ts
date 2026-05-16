@@ -1,7 +1,7 @@
 /**
  * src/constants.ts
  */
-import { Role } from './types';
+import { Role } from './types.js';
 
 export const GAME_CONSTANTS = {
   ROLES: {

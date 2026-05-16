@@ -6,6 +6,7 @@ services:
     environment:
       - NODE_ENV=production
       - TZ=Asia/Tokyo
+      - NODE_OPTIONS=--dns-result-order=ipv4first
     env_file:
       - .env
     network_mode: "host"

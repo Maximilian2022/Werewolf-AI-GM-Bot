@@ -1,21 +1,33 @@
 /**
  * src/managers/SettingsManager.ts
- * 差分補完（ディープマージ）＆ デフォルト値修正版
+ * 決選投票のオプション設定対応版
  */
-import * as fs from 'fs';
-import * as path from 'path';
-import { Logger } from '../utils/logger';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { Logger } from '../utils/logger.js';
 
+// 各フェーズの制限時間設定
 export interface GameSettings {
   day1DiscussionMin: number;
   day2DiscussionMin: number;
-  dayDecreaseMin: number; // 毎日の短縮時間
+  dayDecreaseMin: number; 
   wolfMeetingMin: number;
   actionTimeoutMin: number;
+  handRaiseTimeoutSec: number; 
+  speechMin: number;        
+  lastWordMin: number;      
+  cleanupDelayMin: number;  
+  dataDeletionDays: number; 
+  runoffDefenseMin: number;     // 🚨 新規追加：決選弁明時間（単位：分）
+  runoffVoteTimeoutMin: number; // 🚨 新規追加：決選投票時間（単位：分）
 }
 
 export interface SystemSettings {
   gmVoice: string; 
+  aiModel: string;   
+  mvpMode: 'discussion' | 'contribution' | 'compare';
+  aiTone: 'gentle' | 'normal' | 'spicy' | 'extreme'; 
+  regulation: string; 
 }
 
 export interface AppSettings {
@@ -24,11 +36,42 @@ export interface AppSettings {
   system: SystemSettings;
 }
 
-// 🚨 ご要望通りデフォルト値を変更（通常: 1分短縮、デバッグ: 0分短縮）
 const DEFAULT_SETTINGS: AppSettings = {
-  normal: { day1DiscussionMin: 5, day2DiscussionMin: 4, dayDecreaseMin: 1, wolfMeetingMin: 1, actionTimeoutMin: 1 },
-  debug: { day1DiscussionMin: 0.166, day2DiscussionMin: 0.166, dayDecreaseMin: 0, wolfMeetingMin: 0.25, actionTimeoutMin: 0.25 },
-  system: { gmVoice: 'male' }
+  normal: { 
+    day1DiscussionMin: 5, 
+    day2DiscussionMin: 4,
+    dayDecreaseMin: 1,
+    wolfMeetingMin: 1,
+    actionTimeoutMin: 1,
+    handRaiseTimeoutSec: 15,
+    speechMin: 1,
+    lastWordMin: 1,
+    cleanupDelayMin: 1,
+    dataDeletionDays: 7,
+    runoffDefenseMin: 1,     // 🚨 通常時は1分
+    runoffVoteTimeoutMin: 1  // 🚨 通常時は1分
+  },
+  debug: {
+    day1DiscussionMin: 0.166, 
+    day2DiscussionMin: 0.166,
+    dayDecreaseMin: 0,
+    wolfMeetingMin: 0.166,
+    actionTimeoutMin: 0.166,
+    handRaiseTimeoutSec: 2,
+    speechMin: 0.083,
+    lastWordMin: 0.083,
+    cleanupDelayMin: 0.083,
+    dataDeletionDays: 1,
+    runoffDefenseMin: 0.083,     // 🚨 デバッグ時は5秒 (5/60分)
+    runoffVoteTimeoutMin: 0.083  // 🚨 デバッグ時は5秒 (5/60分)
+  },
+  system: {
+    gmVoice: 'ja-JP-Neural2-D',
+    aiModel: 'gemini-1.5-flash',
+    mvpMode: 'compare',
+    aiTone: 'normal',
+    regulation: '標準レギュレーション（11人/13人）'
+  }
 };
 
 export class SettingsManager {
@@ -37,30 +80,32 @@ export class SettingsManager {
   private readonly savePath = path.join(process.cwd(), 'data', 'settings.json');
 
   private constructor() {
-    this.settings = { ...DEFAULT_SETTINGS };
-    this.load();
+    this.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
   }
 
   public static getInstance(): SettingsManager {
-    if (!SettingsManager.instance) SettingsManager.instance = new SettingsManager();
+    if (!SettingsManager.instance) {
+      SettingsManager.instance = new SettingsManager();
+    }
     return SettingsManager.instance;
   }
 
   public load() {
     if (fs.existsSync(this.savePath)) {
       try {
-        const data = fs.readFileSync(this.savePath, 'utf-8');
-        const parsed = JSON.parse(data);
-        
-        // 🚨 修正: 古いJSONに新しい設定項目が欠けていても、DEFAULT_SETTINGSで補完してあげる（ディープマージ）
+        const parsed = JSON.parse(fs.readFileSync(this.savePath, 'utf-8'));
         this.settings = {
           normal: { ...DEFAULT_SETTINGS.normal, ...(parsed.normal || {}) },
           debug: { ...DEFAULT_SETTINGS.debug, ...(parsed.debug || {}) },
           system: { ...DEFAULT_SETTINGS.system, ...(parsed.system || {}) }
         };
+        // 互換性維持：設定ファイルに古い属性しかない場合の補完
+        if (!this.settings.system.aiTone) this.settings.system.aiTone = 'normal';
+        if (this.settings.system.gmVoice === 'male') this.settings.system.gmVoice = 'ja-JP-Neural2-D';
+        if (this.settings.system.gmVoice === 'female') this.settings.system.gmVoice = 'ja-JP-Neural2-B';
       } catch(e) { 
-        Logger.error('SettingsManager', '設定の読み込みに失敗しました。デフォルト値を使用します。'); 
-        this.settings = { normal: { ...DEFAULT_SETTINGS.normal }, debug: { ...DEFAULT_SETTINGS.debug }, system: { ...DEFAULT_SETTINGS.system } };
+        Logger.error('SettingsManager', '設定の解析に失敗しました。デフォルト値を使用します。'); 
+        this.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
       }
     } else {
       this.save();
@@ -72,36 +117,25 @@ export class SettingsManager {
     fs.writeFileSync(this.savePath, JSON.stringify(this.settings, null, 2));
   }
 
-  public get(isDebug: boolean): GameSettings {
-    return isDebug ? this.settings.debug : this.settings.normal;
-  }
+  public get(isDebug: boolean): GameSettings { return isDebug ? this.settings.debug : this.settings.normal; }
+  public getSystem(): SystemSettings { return this.settings.system; }
 
-  public getSystem(): SystemSettings {
-    return this.settings.system;
-  }
-
-  public update(isDebug: boolean, newSet: GameSettings) {
-    if (isDebug) this.settings.debug = newSet;
-    else this.settings.normal = newSet;
-    this.save();
-  }
-
-  public updateSystem(newSet: SystemSettings) {
-    this.settings.system = newSet;
-    this.save();
-  }
-
-  public reset(type?: 'normal' | 'debug' | 'system') {
-    if (type === 'debug') this.settings.debug = { ...DEFAULT_SETTINGS.debug };
-    else if (type === 'normal') this.settings.normal = { ...DEFAULT_SETTINGS.normal };
-    else if (type === 'system') this.settings.system = { ...DEFAULT_SETTINGS.system };
-    else {
-        this.settings = { 
-            normal: { ...DEFAULT_SETTINGS.normal }, 
-            debug: { ...DEFAULT_SETTINGS.debug }, 
-            system: { ...DEFAULT_SETTINGS.system } 
-        };
+  public update(isDebug: boolean, newSet: Partial<GameSettings>) {
+    if (isDebug) {
+        this.settings.debug = { ...this.settings.debug, ...newSet };
+    } else {
+        this.settings.normal = { ...this.settings.normal, ...newSet };
     }
+    this.save();
+  }
+
+  public updateSystem(newSet: Partial<SystemSettings>) {
+    this.settings.system = { ...this.settings.system, ...newSet };
+        this.save();
+  }
+
+  public reset() {
+    this.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
     this.save();
   }
 }

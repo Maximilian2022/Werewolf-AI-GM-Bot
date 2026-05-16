@@ -2,8 +2,8 @@
  * state/ActionQueue.ts
  * Discord APIのレートリミットを回避するための直列タスク実行キュー
  */
-import { DiscordTask } from '../types';
-import { Logger } from '../utils/logger';
+import { DiscordTask } from '../types.js';
+import { Logger } from '../utils/logger.js';
 
 export class ActionQueue {
   private static instance: ActionQueue;
@@ -96,5 +96,8 @@ export class ActionQueue {
     while (this.isProcessing || this.queue.length > 0) {
       await this.sleep(100);
     }
+  }
+  public isBusy(): boolean {
+    return this.isProcessing || this.queue.length > 0;
   }
 }

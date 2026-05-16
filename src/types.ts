@@ -1,8 +1,8 @@
 /**
  * src/types.ts
- * 完全版（スナップショット対応 ＋ 既存の型定義復活）
+ * 既存の型定義 ＋ スナップショット＆イベントログ対応（真の完全版）
  */
-import { GameSettings } from './managers/SettingsManager';
+import { GameSettings } from './managers/SettingsManager.js';
 
 export type Role = '人狼' | '狂人' | '占い師' | '霊媒師' | '騎士' | '村人';
 
@@ -21,6 +21,7 @@ export interface Player {
   isAlive: boolean;
   waitVcId: string;
   personalRoleId: string;
+  personalTextChannelId: string; // 🚨 新規追加：個人用テキストチャンネル
 }
 
 export interface SpeechLog {
@@ -56,14 +57,16 @@ export interface GameState {
   currentVotes: Record<string, string>;
   nightActions: NightActions;
   speechLogs: SpeechLog[];
-  expectedVcIds: Record<string, string>; // 誰がどのVCにいるべきかの台帳
-  isResumedBonus?: boolean; // 復帰ボーナスフラグ
-  settingsSnapshot: GameSettings; // 🚨 試合開始時の設定スナップショット
+  expectedVcIds: Record<string, string>;
+  isResumedBonus?: boolean;
+  settingsSnapshot: GameSettings;   // 🚨 新規追加項目// 試合開始時の設定スナップショット
+  eventLogs: string[];            // イベントログ
+  endedAt?: number;               // 終了時刻（クリーンアップ用）
+  wolfTextChannelId: string; // 🚨 <--- この1行を新規追加！！！
+  isPaused?: boolean; // 🚨 新規追加：一時停止フラグ
+  relayWorkerId?: string;    // 🚨 追加：中継担当のWorker ID
+  recorderWorkerId?: string; // 🚨 追加：録音担当のWorker ID
 }
-
-// =========================================
-// 🚨 前回削ってしまった型定義を復活
-// =========================================
 
 export interface DiscordTask {
   id: string;
@@ -78,9 +81,11 @@ export interface GameEnvironment {
   wolfVcId: string;
   ghostVcId: string;
   voteChannelId: string;
+  wolfTextChannelId: string; 
   playerEnvs: {
     userId: string;
     waitVcId: string;
     personalRoleId: string;
+    personalTextChannelId: string; // 🚨 新規追加
   }[];
 }

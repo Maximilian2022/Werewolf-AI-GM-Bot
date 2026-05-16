@@ -3,7 +3,7 @@
  * 複数のバイト（Worker）Botを管理し、並列処理の基盤を提供するクラス
  */
 import { Client, GatewayIntentBits, Events } from 'discord.js';
-import { Logger } from '../utils/logger';
+import { Logger } from '../utils/logger.js';
 
 export class WorkerManager {
   private static instance: WorkerManager;
@@ -11,6 +11,31 @@ export class WorkerManager {
 
   private constructor() {}
 
+  /**
+   * 現在フリー（どのVCにも入っていない、かつプレイヤーでもない）なWorkerを必要な数だけ取得する
+   * @param serverId 検索対象のサーバーID
+   * @param playerIds このゲームに参加しているプレイヤーのIDリスト
+   * @param neededCount 必要なWorkerの数
+   */
+  public async getFreeWorkers(serverId: string, playerIds: string[], neededCount: number): Promise<Client[]> {
+    const freeWorkers: Client[] = [];
+    
+    for (const worker of this.workers) {
+      if (freeWorkers.length >= neededCount) break;
+      if (playerIds.includes(worker.user?.id || '')) continue; // プレイヤーとして参加している子は除外
+
+      try {
+        const guild = await worker.guilds.fetch(serverId).catch(() => null);
+        // VCに入っていなければ「フリー」と判定
+        if (guild && guild.members.me && !guild.members.me.voice.channelId) {
+          freeWorkers.push(worker);
+        }
+      } catch (e) {}
+    }
+    
+    return freeWorkers;
+  }
+  
   public static getInstance(): WorkerManager {
     if (!WorkerManager.instance) {
       WorkerManager.instance = new WorkerManager();

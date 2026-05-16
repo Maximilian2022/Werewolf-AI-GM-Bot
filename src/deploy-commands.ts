@@ -17,15 +17,21 @@ const commands = [
   new SlashCommandBuilder().setName('ミュート解除').setDescription('緊急解除'),
   new SlashCommandBuilder().setName('廃村').setDescription('強制削除').addStringOption(o => o.setName('ゲームid').setDescription('ID').setRequired(true)),
   new SlashCommandBuilder().setName('再解析').setDescription('MVP再解析').addStringOption(o => o.setName('ゲームid').setDescription('ID').setRequired(true)),
-  // 🚨 新規追加
   new SlashCommandBuilder().setName('観戦').setDescription('現在進行中のゲームに観戦者（霊界）として途中参加します'),
-  new SlashCommandBuilder().setName('設定').setDescription('【管理者用】ゲームの制限時間などを設定します')
-].map(command => command.toJSON());
+  new SlashCommandBuilder().setName('設定').setDescription('【管理者用】ゲームの制限時間やAIの難易度などを設定します'),
+  // 🚨 新規追加：中断（一時停止）コマンド群
+  new SlashCommandBuilder().setName('中断').setDescription('ゲームの進行を一時停止します（トイレ離席など）'),
+  new SlashCommandBuilder().setName('中断解除').setDescription('一時停止したゲームの進行を再開します')
+];
 
 const rest = new REST({ version: '10' }).setToken(token);
+
 (async () => {
   try {
+    console.log('Started refreshing application (/) commands.');
     await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
-    console.log('✅ コマンド同期完了');
-  } catch (error) { console.error('❌ 同期エラー:', error); }
+    console.log('Successfully reloaded application (/) commands.');
+  } catch (error) {
+    console.error(error);
+  }
 })();

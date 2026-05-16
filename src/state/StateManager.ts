@@ -1,19 +1,22 @@
 /**
- * state/StateManager.ts
- * ゲームのState（状態）管理とJSONファイルへの簡易永続化を担うクラス
+ * src/state/StateManager.ts
+ * イベントループ最適化（非同期I/Oバックグラウンド保存）対応版
  */
-import * as fs from 'fs';
-import * as path from 'path';
-import { GameState, Phase } from '../types';
-import { Logger } from '../utils/logger';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { GameState, Phase } from '../types.js';
+import { Logger } from '../utils/logger.js';
 
 export class StateManager {
   private static instance: StateManager;
   private state: GameState | null = null;
   private readonly saveDir = path.join(process.cwd(), 'data', 'games');
+  
+  // 🚨 連続保存によるファイルの競合（破損）を防ぐためのキュー制御フラグ
+  private isSaving = false;
+  private pendingSave = false;
 
   private constructor() {
-    // 保存用ディレクトリの作成
     if (!fs.existsSync(this.saveDir)) {
       fs.mkdirSync(this.saveDir, { recursive: true });
       Logger.system(`State保存用ディレクトリを作成しました: ${this.saveDir}`);
@@ -27,88 +30,68 @@ export class StateManager {
     return StateManager.instance;
   }
 
-  /**
-   * 新しいゲームStateを初期化
-   */
   public initState(initialState: GameState): void {
     this.state = initialState;
     Logger.info('StateManager', '新しいゲームのStateを初期化しました', this.state.gameId);
-    this.saveToFile();
+    this.saveToFileAsync().catch(()=>{}); // 🚨 非同期保存
   }
 
-  /**
-   * 現在のStateを取得
-   */
   public getState(): GameState {
     if (!this.state) {
-      const errorMsg = 'ゲームStateが初期化される前に取得されようとしました。';
-      Logger.error('StateManager', errorMsg);
-      throw new Error(errorMsg);
+      throw new Error('State is not initialized');
     }
-    // 参照渡しによる予期せぬ書き換えを防ぐため、簡易的なクローンを返す
-    return JSON.parse(JSON.stringify(this.state));
+    return this.state;
   }
 
-  /**
-   * 特定のプロパティを更新し、自動的に保存する
-   */
-  public updateState(partialState: Partial<GameState>): void {
-    if (!this.state) {
-      Logger.warn('StateManager', 'Stateが未初期化のため、updateStateがスキップされました');
+  public updateState(newState: Partial<GameState>): void {
+    if (!this.state) return;
+    this.state = { ...this.state, ...newState };
+    // 🚨 同期書き込みを廃止し、裏側でこっそり保存させる（音声を止めない）
+    this.saveToFileAsync().catch(e => Logger.error('StateManager', '保存エラー', e));
+  }
+
+  public nextPhase(newPhase: Phase): void {
+    if (!this.state) return;
+    this.state.phase = newPhase;
+    Logger.info('StateManager', `フェーズが移行しました: ${newPhase}`, this.state.gameId);
+    this.saveToFileAsync().catch(()=>{});
+  }
+
+  // 🚨 新規追加：音声処理を邪魔しない「非同期バックグラウンド保存」
+  private async saveToFileAsync(): Promise<void> {
+    if (!this.state) return;
+    
+    // 現在保存中なら、「あとでもう1回保存する」という予約だけして終わる
+    if (this.isSaving) {
+      this.pendingSave = true;
       return;
     }
 
-    this.state = {
-      ...this.state,
-      ...partialState,
-    };
-
-    // Stateの更新自体は頻繁に行われるため、ここでのログはdebugレベルに留める
-    Logger.debug('StateManager', `Stateの一部が更新されました: [${Object.keys(partialState).join(', ')}]`, this.state.gameId);
-
-    // フェーズ移行や重要な更新時に保存
-    this.saveToFile();
-  }
-
-  /**
-   * フェーズのみを更新
-   */
-  public nextPhase(phase: Phase): void {
-    if (!this.state) return;
-    
-    Logger.info('StateManager', `🔄 フェーズが移行しました: [${this.state.phase}] -> [${phase}]`, this.state.gameId);
-    this.updateState({ phase });
-  }
-
-  /**
-   * JSONファイルへ保存
-   */
-  private saveToFile(): void {
-    if (!this.state) return;
-
+    this.isSaving = true;
+    this.pendingSave = false;
     const filePath = path.join(this.saveDir, `${this.state.gameId}.json`);
+    const data = JSON.stringify(this.state, null, 2);
+
     try {
-      const data = JSON.stringify(this.state, null, 2);
-      fs.writeFileSync(filePath, data, 'utf-8');
-      Logger.success('StateManager', `Stateをファイルに保存しました: ${this.state.gameId}.json`, this.state.gameId);
+      await fs.promises.writeFile(filePath, data, 'utf-8');
     } catch (error) {
       Logger.error('StateManager', `Stateの保存に失敗しました: ${this.state.gameId}.json`, error, this.state.gameId);
+    } finally {
+      this.isSaving = false;
+      // 予約があれば再度実行する
+      if (this.pendingSave) {
+        this.saveToFileAsync().catch(()=>{});
+      }
     }
   }
 
-  /**
-   * 指定したGameIDのJSONからStateを復元（/再開 コマンド用）
-   */
   public loadFromFile(gameId: string): boolean {
     const filePath = path.join(this.saveDir, `${gameId}.json`);
-    
     Logger.info('StateManager', `セーブファイルからのState復元を試行します: ${gameId}.json`, gameId);
-
     if (!fs.existsSync(filePath)) {
       Logger.warn('StateManager', `セーブファイルが見つかりません: ${gameId}.json`, gameId);
       return false;
     }
-
     try {
       const data = fs.readFileSync(filePath, 'utf-8');
       this.state = JSON.parse(data) as GameState;
@@ -120,21 +103,10 @@ export class StateManager {
     }
   }
 
-  /**
-   * ゲーム終了時のクリーンアップ（ファイルを削除する場合）
-   */
   public deleteSaveFile(gameId: string): void {
     const filePath = path.join(this.saveDir, `${gameId}.json`);
-    
     if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-        Logger.success('StateManager', `セーブファイルを削除しました: ${gameId}.json`, gameId);
-      } catch (error) {
-        Logger.error('StateManager', `セーブファイルの削除に失敗しました: ${gameId}.json`, error, gameId);
-      }
-    } else {
-      Logger.warn('StateManager', `削除対象のセーブファイルが存在しませんでした: ${gameId}.json`, gameId);
+      try { fs.unlinkSync(filePath); } catch (e) {}
     }
   }
 }

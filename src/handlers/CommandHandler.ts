@@ -1,27 +1,186 @@
 /**
  * src/handlers/CommandHandler.ts
- * サーバーニックネーム対応版
+ * AIモデル・MVPモード選択 ＆ 再解析データ保護 ＆ 中断（一時停止）機能 ＆ 完全自由化・分割UI対応版
  */
 import { 
   ChatInputCommandInteraction, GuildMember, PermissionsBitField, Client, TextChannel, VoiceBasedChannel,
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle,
-  ButtonInteraction, ModalSubmitInteraction
+  ButtonInteraction, ModalSubmitInteraction, StringSelectMenuBuilder, StringSelectMenuInteraction, MessageFlags
 } from 'discord.js';
-import { StateManager } from '../state/StateManager';
-import { DiscordService } from '../services/DiscordService';
-import { PhaseHandler } from './PhaseHandler';
-import { WorkerManager } from '../managers/WorkerManager';
-import { VoiceService } from '../services/VoiceService';
-import { VCWatcher } from '../managers/VCWatcher';
-import { AIService } from '../services/AIService';
-import { SettingsManager } from '../managers/SettingsManager';
-import { Logger } from '../utils/logger';
-import { GameState } from '../types';
+import { StateManager } from '../state/StateManager.js';
+import { DiscordService } from '../services/DiscordService.js';
+import { PhaseHandler } from './PhaseHandler.js';
+import { WorkerManager } from '../managers/WorkerManager.js';
+import { VoiceService } from '../services/VoiceService.js';
+import { VCWatcher } from '../managers/VCWatcher.js';
+import { AIService } from '../services/AIService.js';
+import { SettingsManager, GameSettings } from '../managers/SettingsManager.js';
+import { Logger } from '../utils/logger.js';
+import { GameState } from '../types.js';
+import { createAudioPlayer, createAudioResource, StreamType } from '@discordjs/voice';
+import { Readable } from 'node:stream';
+import { TTSService } from '../services/TTSService.js';
 
 export class CommandHandler {
+  private static splitMessage(text: string, maxLength = 1900): string[] {
+    if (text.length <= maxLength) return [text];
+    const lines = text.split('\n');
+    const chunks: string[] = [];
+    let current = '';
+    for (const line of lines) {
+      if ((current.length + line.length + 1) > maxLength) {
+        chunks.push(current);
+        current = line + '\n';
+      } else {
+        current += line + '\n';
+      }
+    }
+    if (current.trim().length > 0) chunks.push(current);
+    return chunks;
+  }
+
+  // ===============================================
+  // ⚙️ 設定画面のUI生成ヘルパー（リアルタイム更新用）
+  // ===============================================
+  private static async generateSettingsPayload() {
+    const settingsMgr = SettingsManager.getInstance();
+    const normal = settingsMgr.get(false), debug = settingsMgr.get(true), sys = settingsMgr.getSystem();
+    const aiModels = await AIService.getAvailableModels();
+
+    const embed = new EmbedBuilder()
+      .setTitle('⚙️ ゲーム設定マネージャー')
+      .setDescription('下のプルダウンから変更したい項目を選択してください。\n設定が完了すると、この画面は自動で最新の状態に更新されます。')
+      .setColor('#2b2d31')
+      .addFields(
+        { name: '🟢 通常モード(時間)', value: `議論: ${normal.day1DiscussionMin}分 / ${normal.day2DiscussionMin}分 (短縮${normal.dayDecreaseMin}分)\n内通: ${normal.wolfMeetingMin}分\n行動: ${normal.actionTimeoutMin}分\n発言: ${normal.speechMin}分 / 遺言: ${normal.lastWordMin}分\n挙手待ち: ${normal.handRaiseTimeoutSec}秒`, inline: true },
+        { name: '🐛 デバッグ(時間)', value: `議論: ${debug.day1DiscussionMin}分 / ${debug.day2DiscussionMin}分 (短縮${debug.dayDecreaseMin}分)\n内通: ${debug.wolfMeetingMin}分\n行動: ${debug.actionTimeoutMin}分\n発言: ${debug.speechMin}分 / 遺言: ${debug.lastWordMin}分\n挙手待ち: ${debug.handRaiseTimeoutSec}秒`, inline: true },
+        { name: '🎙️ システム・演出設定', value: `データ保持: ${normal.dataDeletionDays}日 / 終了ディレイ: ${normal.cleanupDelayMin}分\nGMの声: **${sys.gmVoice}**\nAIモデル: **${sys.aiModel}**\nMVPモード: **${sys.mvpMode}**\nAIトーン: **${sys.aiTone}**`, inline: false }
+      );
+
+    // 🚨 修正：ボタンを廃止し、カテゴリ選択のプルダウンに統合（5項目の上限回避）
+    const rowCategory = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('settings_category_select')
+        .setPlaceholder('⏱️ 制限時間・システム保持を変更...')
+        .addOptions([
+          { label: '☀️ 昼・夜フェーズ (通常)', value: 'edit_normal_day_night' },
+          { label: '🗳️ 投票・処刑フェーズ (通常)', value: 'edit_normal_vote_exec' },
+          { label: '⚙️ 演出・データ保持 (通常)', value: 'edit_normal_system_delay' },
+          { label: '🐛 昼・夜フェーズ (デバッグ)', value: 'edit_debug_day_night' },
+          { label: '🐛 投票・処刑フェーズ (デバッグ)', value: 'edit_debug_vote_exec' },
+          { label: '🐛 演出・データ保持 (デバッグ)', value: 'edit_debug_system_delay' },
+          { label: '⚠️ 全ての設定を初期化 (リセット)', value: 'reset_all' }
+        ])
+    );
+
+    const rowVoice = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('settings_voice_select')
+        .setPlaceholder('🎙️ GMの音声モデルを変更')
+        .addOptions([
+          { label: '男性・低音 (Neural2-D) ※デフォルト', value: 'ja-JP-Neural2-D', default: sys.gmVoice === 'ja-JP-Neural2-D' },
+          { label: '男性・高音 (Neural2-C)', value: 'ja-JP-Neural2-C', default: sys.gmVoice === 'ja-JP-Neural2-C' },
+          { label: '女性・落ち着いた声 (Neural2-B)', value: 'ja-JP-Neural2-B', default: sys.gmVoice === 'ja-JP-Neural2-B' },
+          { label: '女性・明るい声 (Neural2-A)', value: 'ja-JP-Neural2-A', default: sys.gmVoice === 'ja-JP-Neural2-A' }
+        ])
+    );
+
+    const rowMvpMode = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('settings_mvpmode_select')
+        .setPlaceholder('⚖️ MVP評価モードを変更')
+        .addOptions([
+          { label: '議論重視モード (従来通り)', value: 'discussion', default: sys.mvpMode === 'discussion' },
+          { label: '勝利貢献度重視モード (役職や勝敗を加味)', value: 'contribution', default: sys.mvpMode === 'contribution' },
+          { label: '比較モード (両方のAI講評を出力)', value: 'compare', default: sys.mvpMode === 'compare' }
+        ])
+    );
+
+    const rowAiModel = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('settings_aimodel_select')
+        .setPlaceholder('🧠 AIモデルを変更')
+        .addOptions(aiModels.map(m => ({ label: m.label, value: m.value, default: sys.aiModel === m.value })))
+    );
+
+    const rowAiTone = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('settings_aitone_select')
+        .setPlaceholder('🎭 AI講評の難易度（毒舌度）を変更')
+        .addOptions([
+          { label: '🟢 優しめ (初心者向けサポート)', value: 'gentle', default: sys.aiTone === 'gentle' },
+          { label: '🔵 普通 (プロの解説者)', value: 'normal', default: sys.aiTone === 'normal' },
+          { label: '🔴 辛口 (妥協なき鬼コーチ)', value: 'spicy', default: sys.aiTone === 'spicy' },
+          { label: '🔥 激辛 (的確に刺す煽り毒舌GM)', value: 'extreme', default: sys.aiTone === 'extreme' }
+        ])
+    );
+
+    return { embeds: [embed], components: [rowCategory, rowVoice, rowMvpMode, rowAiModel, rowAiTone] };
+  }
+
+  // ===============================================
+  // 中断・再開コマンド
+  // ===============================================
+  public static async handlePause(interaction: ChatInputCommandInteraction) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const stateManager = StateManager.getInstance();
+    const state = stateManager.getState();
+
+    if (!state || state.phase === 'finished' || state.phase === 'setup') {
+      return interaction.editReply('❌ 一時停止できる進行中のゲームがありません。');
+    }
+    if (state.isPaused) {
+      return interaction.editReply('⚠️ 既に一時停止中です。');
+    }
+
+    const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionsBitField.Flags.Administrator);
+    const isPlayer = state.players.some(p => p.userId === interaction.user.id);
+    if (!isAdmin && !isPlayer) {
+      return interaction.editReply('❌ 一時停止を行う権限がありません。');
+    }
+
+    state.isPaused = true;
+    stateManager.updateState(state);
+
+    const guild = interaction.guild!;
+    const voteChannel = await guild.channels.fetch(state.voteChannelId).catch(()=>null) as TextChannel;
+    if (voteChannel) {
+      await voteChannel.send(`⏸️ **【ゲーム一時停止】**\n<@${interaction.user.id}> さんの操作により、進行を一時停止しました。\n離席者が戻られたら \`/中断解除\` を実行してください。\n*(※人狼の作戦会議のみ、時間を止めずに進行します)*`);
+    }
+    await interaction.editReply('✅ ゲームを一時停止しました。');
+  }
+
+  public static async handleUnpause(interaction: ChatInputCommandInteraction) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const stateManager = StateManager.getInstance();
+    const state = stateManager.getState();
+
+    if (!state || state.phase === 'finished' || state.phase === 'setup') {
+      return interaction.editReply('❌ 再開できるゲームがありません。');
+    }
+    if (!state.isPaused) {
+      return interaction.editReply('⚠️ ゲームは一時停止されていません。');
+    }
+
+    const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionsBitField.Flags.Administrator);
+    const isPlayer = state.players.some(p => p.userId === interaction.user.id);
+    if (!isAdmin && !isPlayer) {
+      return interaction.editReply('❌ 再開を行う権限がありません。');
+    }
+
+    state.isPaused = false;
+    stateManager.updateState(state);
+
+    const guild = interaction.guild!;
+    const voteChannel = await guild.channels.fetch(state.voteChannelId).catch(()=>null) as TextChannel;
+    if (voteChannel) {
+      await voteChannel.send(`▶️ **【進行再開】**\n全員揃ったため、タイマーと進行を再開します！`);
+    }
+    await interaction.editReply('✅ ゲームを再開しました。');
+  }
+
   public static async handleStart(interaction: ChatInputCommandInteraction, gmClient: Client, assistantClient: Client) {
     await interaction.deferReply();
-
     const guild = interaction.guild!;
     const member = interaction.member as GuildMember;
     const voiceChannel = member.voice.channel;
@@ -34,7 +193,6 @@ export class CommandHandler {
 
     const isDebug = interaction.options.getBoolean('debug') ?? false;
     const targetCount = interaction.options.getInteger('人数');
-
     const allMembers = Array.from(voiceChannel.members.values()).filter((m: any) => !m.user.bot);
     const spectators = allMembers.filter((m: any) => m.displayName.startsWith('[観戦]'));
     const humanParticipants = allMembers.filter((m: any) => !m.displayName.startsWith('[観戦]'));
@@ -67,7 +225,6 @@ export class CommandHandler {
             await new Promise(resolve => setTimeout(resolve, 500));
           }
         }
-
         const summonedResults = await Promise.all(summonPromises);
         const summonedWorkers = summonedResults.filter((w: any): w is GuildMember => w !== null);
         participants.push(...summonedWorkers);
@@ -89,22 +246,51 @@ export class CommandHandler {
 
     try {
       await DiscordService.cleanupAllLegacyResources(guild);
-      const env = await DiscordService.setupGameEnvironment(guild, gameId, participants, spectators, gmClient.user!.id, assistantClient.user!.id);
 
-      const initialState: GameState = {
+      // 🚨 先行対処：環境構築が途中でフリーズしても /廃村 できるよう、先に最小限のStateファイルを作ってしまう
+      const preState: any = {
+        gameId,
+        serverId: guild.id,
+        phase: 'setup',
+        players: participants.map(p => ({ userId: p.id, role: null, isAlive: true, waitVcId: '', personalRoleId: '', personalTextChannelId: '' })),
+        eventLogs: ['[セットアップ開始] 環境リソース構築準備中']
+      };
+      // この時点で data/games/[gameId].json が非同期で即座に生成されます
+      StateManager.getInstance().initState(preState);
+
+      // 🚨 setupGameEnvironment の呼び出しに、進捗更新用の関数を渡す
+      const env = await DiscordService.setupGameEnvironment(
+        guild, gameId, participants, spectators, gmClient.user!.id, assistantClient.user!.id,
+        async (current, total) => {
+          // 10秒ごとにこの処理が呼ばれ、メッセージが更新される
+          await interaction.editReply(`🏗️ 隔離環境を構築しています... (${current}/${total}人完了)\n※Discordの制限回避のため、完了まで約20秒ほどお待ちください。`).catch(() => {});
+        }
+      );
+      
+      Logger.info('CommandHandler', `🏗️ [環境リソースID一覧]
+        - Category : ${env.categoryId}
+        - Main VC  : ${env.mainVcId}
+        - Wolf VC  : ${env.wolfVcId}
+        - Ghost VC : ${env.ghostVcId}
+        - Vote CH  : ${env.voteChannelId}
+        - Wolf CH  : ${env.wolfTextChannelId}`, gameId);
+
+      // 🚨 修正：initState ではなく「updateState」を使い、完成した完全な環境情報を上書き保存する
+      const finalState: GameState = {
         gameId, serverId: guild.id, categoryId: env.categoryId, originalVcId: voiceChannel.id,
-        waitVcId: env.mainVcId, mainVcId: env.mainVcId, wolfVcId: env.wolfVcId, ghostVcId: env.ghostVcId, voteChannelId: env.voteChannelId,
+        waitVcId: env.mainVcId, mainVcId: env.mainVcId, wolfVcId: env.wolfVcId, ghostVcId: env.ghostVcId, 
+        voteChannelId: env.voteChannelId, wolfTextChannelId: env.wolfTextChannelId,
         isDebug, phase: 'setup', day: 0,
         players: participants.map((p: any) => {
           const pEnv = env.playerEnvs.find((e: any) => e.userId === p.id)!;
-          return { userId: p.id, role: null, isAlive: true, waitVcId: pEnv.waitVcId, personalRoleId: pEnv.personalRoleId };
+          return { userId: p.id, role: null, isAlive: true, waitVcId: pEnv.waitVcId, personalRoleId: pEnv.personalRoleId, personalTextChannelId: pEnv.personalTextChannelId };
         }),
-        lastGuardedUserId: null, currentVotes: {}, nightActions: {}, speechLogs: [], expectedVcIds: {} ,
-        // 🚨 その時点の設定をスナップショットとして固定
-        settingsSnapshot: SettingsManager.getInstance().get(isDebug)
+        lastGuardedUserId: null, currentVotes: {}, nightActions: {}, speechLogs: [], expectedVcIds: {},
+        settingsSnapshot: SettingsManager.getInstance().get(isDebug),
+        eventLogs: [...preState.eventLogs, '[セットアップ完了] 全てのリソースの構築に成功'],
+        isPaused: false
       };
-
-      StateManager.getInstance().initState(initialState);
+      StateManager.getInstance().initState(finalState);
       
       const voteChannel = await guild.channels.fetch(env.voteChannelId) as TextChannel;
       if (voteChannel) {
@@ -115,7 +301,7 @@ export class CommandHandler {
       }
 
       try { await interaction.editReply(`🐺 セットアップ完了。役職配布フェーズへ移行します。`); } catch {}
-      VCWatcher.getInstance().start(gmClient);
+      VCWatcher.getInstance().start(gmClient, assistantClient);
       await PhaseHandler.startRoleDistribution(gmClient, assistantClient, gameId);
 
     } catch (error: any) {
@@ -133,12 +319,10 @@ export class CommandHandler {
       await interaction.editReply(`❌ エラー: ゲームID [${gameId}] のセーブデータが見つかりません。`);
       return;
     }
-
     const state = stateManager.getState() as any;
     state.isResumedBonus = true;
     stateManager.updateState(state);
-
-    VCWatcher.getInstance().start(gmClient);
+    VCWatcher.getInstance().start(gmClient, assistantClient);
     await interaction.editReply(`✅ ゲーム [${gameId}] の復元に成功しました。進行を再開します。`);
     await PhaseHandler.resumeGame(gmClient, assistantClient, gameId);
   }
@@ -154,45 +338,83 @@ export class CommandHandler {
     }
 
     const stateManager = StateManager.getInstance();
-    if (stateManager.loadFromFile(gameId)) {
-      const state = stateManager.getState();
-      if (state.originalVcId) {
-        await interaction.editReply(`⏳ プレイヤーをロビーへ送還中...`);
-        const promises = state.players.map(async p => {
-          try {
-            const m = await guild.members.fetch(p.userId).catch(()=>null);
-            if (m && m.voice.channelId) await m.voice.setChannel(state.originalVcId).catch(()=>{});
-          } catch(e) {}
-        });
-        await Promise.all(promises);
-      }
+    if (!stateManager.loadFromFile(gameId)) {
+      await interaction.editReply(`❌ エラー: ゲームID [\`${gameId}\`] のセーブデータが見つかりません。`);
+      return;
     }
+
+    const state = stateManager.getState();
 
     try {
+      if (state.originalVcId) {
+        await interaction.editReply(`⏳ プレイヤーをロビーへ送還中...`);
+        const movePromises = state.players.map(async p => {
+          try {
+            const m = await guild.members.fetch(p.userId).catch(() => null);
+            if (m && m.voice.channelId) {
+              const currentChannel = await guild.channels.fetch(m.voice.channelId).catch(() => null);
+              if (currentChannel && currentChannel.parentId === state.categoryId) {
+                await m.voice.setChannel(state.originalVcId).catch(() => {});
+              }
+            }
+          } catch (e) {}
+        });
+        await Promise.all(movePromises);
+      }
+
+      const workers = WorkerManager.getInstance().getWorkers();
+      await Promise.all(workers.map(async (worker, index) => {
+        try {
+          const wGuild = await worker.guilds.fetch(state.serverId).catch(() => null);
+          if (wGuild && wGuild.members.me) {
+            const isMic = wGuild.members.me.nickname?.includes('マイク');
+            const isInMyVillage = wGuild.members.me.voice.channelId === state.mainVcId;
+
+            if (isMic && isInMyVillage) {
+              const num = String(index + 1).padStart(2, '0');
+              await wGuild.members.me.setNickname(`人狼ゲームスタッフ${num}`).catch(() => {});
+            }
+          }
+        } catch (e) {}
+      }));
+
+      VoiceService.disconnectAll(gameId);
       await DiscordService.abandonGameEnvironment(guild, gameId);
-      StateManager.getInstance().deleteSaveFile(gameId);
+      stateManager.deleteSaveFile(gameId);
       VCWatcher.getInstance().stop();
+
       await interaction.editReply(`✅ GameID [\`${gameId}\`] の廃村処理が完了し、環境とセーブデータを完全に削除しました。`);
     } catch (error) {
-      await interaction.editReply(`❌ 廃村処理中にエラーが発生しました。一部のチャンネルが残っている可能性があります。`);
+      Logger.error('CommandHandler', '廃村処理中にエラーが発生しました', error, gameId);
+      await interaction.editReply(`❌ 廃村処理中にエラーが発生しました。一部のカテゴリーやチャンネルが残っている可能性があります。`);
     }
   }
-
+  
   public static async handleEmergencyUnmute(interaction: ChatInputCommandInteraction) {
-    await interaction.deferReply({ ephemeral: true });
-    const guild = interaction.guild!;
-    const state = StateManager.getInstance().getState();
-    let count = 0;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const member = interaction.member as GuildMember;
+    const voiceChannel = member.voice.channel;
 
-    if (state?.players) {
-       for (const p of state.players) {
-          try {
-             const member = await guild.members.fetch(p.userId);
-             if (member.voice.channelId) { await member.voice.setMute(false); count++; }
-          } catch { }
-       }
+    if (!voiceChannel) {
+      await interaction.editReply('❌ エラー: ミュート解除したい人がいるボイスチャンネルに参加してから実行してください。');
+      return;
     }
-    await interaction.editReply(`✅ 接続中の ${count} 名のサーバーミュートを強制解除しました。`);
+
+    let count = 0;
+    try {
+      for (const targetMember of voiceChannel.members.values()) {
+        if (targetMember.voice.serverMute && !targetMember.user.bot) {
+          try {
+            await targetMember.voice.setMute(false);
+            count++;
+          } catch (e) {}
+        }
+      }
+      await interaction.editReply(`✅ 現在のボイスチャンネル（${voiceChannel.name}）にいる ${count} 名のサーバーミュートを強制解除しました。`);
+    } catch (error) {
+      Logger.error('CommandHandler', '緊急ミュート解除中にエラーが発生しました', error);
+      await interaction.editReply('❌ ミュート解除処理中にエラーが発生しました。');
+    }
   }
 
   public static async handleReanalyze(interaction: ChatInputCommandInteraction) {
@@ -200,23 +422,17 @@ export class CommandHandler {
     const gameId = interaction.options.getString('ゲームid');
     const stateManager = StateManager.getInstance();
 
-    if (!gameId || !stateManager.loadFromFile(gameId)) {
-      await interaction.editReply(`❌ エラー: ゲームIDが見つかりません。`);
-      return;
-    }
-
+    if (!gameId || !stateManager.loadFromFile(gameId)) return interaction.editReply(`❌ エラー: ゲームIDが見つかりません。すでに保存期間が経過して削除された可能性があります。`);
     const state = stateManager.getState();
-    if (!state.speechLogs || state.speechLogs.length === 0) {
-      await interaction.editReply(`❌ エラー: 録音データがありません。`);
-      return;
-    }
+    if (!state.speechLogs || state.speechLogs.length === 0) return interaction.editReply(`❌ エラー: 録音データがありません。`);
 
     try {
-      await interaction.editReply(`🧠 再解析中...`);
+      const sys = SettingsManager.getInstance().getSystem();
+      await interaction.editReply(`🧠 再解析中... [モデル: \`${sys.aiModel}\` / モード: \`${sys.mvpMode}\`]`);
+      
       const playerNameMap: Record<string, string> = {};
       for (const p of state.players) {
           try {
-              // 🚨 修正: GuildMember から displayName (ニックネーム) を取得
               const member = await interaction.guild!.members.fetch(p.userId);
               playerNameMap[p.userId] = member.displayName;
           } catch (e) {
@@ -224,36 +440,33 @@ export class CommandHandler {
           }
       }
 
-      const mvpText = await AIService.analyzeMVP(gameId, state.speechLogs, playerNameMap);
-      await interaction.followUp(`🏆 **【MVP再解析結果: ${gameId}】**\n${mvpText}`);
-      stateManager.deleteSaveFile(gameId);
-      await interaction.followUp(`✅ セーブデータを削除しました。`);
+      const mvpText = await AIService.analyzeMVP(gameId, state.speechLogs, playerNameMap, state.eventLogs || []);
+      const chunks = this.splitMessage(`🏆 **【MVP再解析結果: ${gameId}】**\n${mvpText}`);
+      for (const chunk of chunks) await interaction.followUp(chunk);
+      await interaction.followUp(`✅ 再解析が完了しました。（データは設定された日数分保持されるため、設定を変更して何度でも再解析可能です）`);
     } catch (error) {
       await interaction.followUp(`❌ 再解析に失敗しました。`);
     }
   }
 
   public static async handleSpectate(interaction: ChatInputCommandInteraction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const stateManager = StateManager.getInstance();
     
     let state;
     try { state = stateManager.getState(); } catch (e) {
-      await interaction.editReply('❌ 現在進行中のゲームが見つかりません。');
-      return;
+      return interaction.editReply('❌ 現在進行中のゲームが見つかりません。');
     }
 
     if (!state || state.phase === 'finished' || state.phase === 'setup') {
-      await interaction.editReply('❌ 観戦可能な進行中のゲームが見つかりません。');
-      return;
+      return interaction.editReply('❌ 観戦可能な進行中のゲームが見つかりません。');
     }
 
     const guild = interaction.guild!;
     const member = interaction.member as GuildMember;
 
     if (!member.displayName.startsWith('[観戦]')) {
-      try { await member.setNickname(`[観戦]${member.displayName.substring(0, 28)}`); } 
-      catch (e) { Logger.warn('CommandHandler', `ニックネーム変更権限なし (スキップ): ${member.user.tag}`); }
+      try { await member.setNickname(`[観戦]${member.displayName.substring(0, 28)}`); } catch (e) {Logger.warn('CommandHandler', `ニックネーム変更権限なし (スキップ): ${member.user.tag}`);}
     }
 
     try {
@@ -261,7 +474,7 @@ export class CommandHandler {
       if (ghostVc) {
         await ghostVc.permissionOverwrites.edit(member.id, { ViewChannel: true, Connect: true, Speak: true });
         await interaction.editReply(`✅ 観戦モードとして途中参加しました！\n人狼村カテゴリ内の **「霊界」** チャンネルに接続してください。`);
-      } else {
+      }else {
         await interaction.editReply('❌ 霊界チャンネルが見つかりませんでした。');
       }
     } catch (e) {
@@ -269,92 +482,200 @@ export class CommandHandler {
     }
   }
 
+  // ===============================================
+  // ⚙️ 設定コマンドとプルダウン処理
+  // ===============================================
   public static async handleSettings(interaction: ChatInputCommandInteraction) {
-    const settingsMgr = SettingsManager.getInstance();
-    const normal = settingsMgr.get(false);
-    const debug = settingsMgr.get(true);
-    const sys = settingsMgr.getSystem();
-
-    const embed = new EmbedBuilder()
-      .setTitle('⚙️ ゲーム設定マネージャー')
-      .setColor('#2b2d31')
-      .addFields(
-        { name: '🟢 通常モード(時間)', value: `初日議論: ${normal.day1DiscussionMin}分\n2日目以降: ${normal.day2DiscussionMin}分\n毎日の短縮: ${normal.dayDecreaseMin}分\n人狼内通: ${normal.wolfMeetingMin}分\n行動猶予: ${normal.actionTimeoutMin}分`, inline: true },
-        { name: '🐛 デバッグモード(時間)', value: `初日議論: ${debug.day1DiscussionMin}分\n2日目以降: ${debug.day2DiscussionMin}分\n毎日の短縮: ${debug.dayDecreaseMin}分\n人狼内通: ${debug.wolfMeetingMin}分\n行動猶予: ${debug.actionTimeoutMin}分`, inline: true },
-        { name: '🖥️ システム設定', value: `GMの声: ${sys.gmVoice === 'female' ? '女性 (高橋ヨスガ風)' : '男性 (デフォルト)'}`, inline: false }
-      );
-
-    const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('settings_edit_normal').setLabel('通常時間を変更').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('settings_edit_debug').setLabel('デバッグ時間を変更').setStyle(ButtonStyle.Secondary)
-    );
-    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('settings_edit_system').setLabel('システム設定を変更').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('settings_reset').setLabel('全てリセット').setStyle(ButtonStyle.Danger)
-    );
-
-    await interaction.reply({ embeds: [embed], components: [row1, row2], ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const payload = await this.generateSettingsPayload();
+    await interaction.editReply(payload);  
   }
 
-  public static async handleSettingsButton(interaction: ButtonInteraction) {
-    if (interaction.customId === 'settings_reset') {
-      SettingsManager.getInstance().reset();
-      await interaction.update({ content: '✅ 全ての設定を初期値にリセットしました。再度 `/設定` を実行して確認してください。', embeds: [], components: [] });
-      return;
-    }
+  public static async handleSettingsSelect(interaction: StringSelectMenuInteraction) {
+    const customId = interaction.customId;
+    const value = interaction.values[0];
 
-    if (interaction.customId === 'settings_edit_system') {
-      const sys = SettingsManager.getInstance().getSystem();
-      const modal = new ModalBuilder().setCustomId('modal_settings_system').setTitle('🖥️ システム設定を変更');
-      const input = new TextInputBuilder().setCustomId('voice').setLabel('GMの声 (male または female と入力)').setStyle(TextInputStyle.Short).setValue(sys.gmVoice);
-      modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
-      await interaction.showModal(modal);
-      return;
-    }
-
-    const isDebug = interaction.customId === 'settings_edit_debug';
-    const current = SettingsManager.getInstance().get(isDebug);
-    const modal = new ModalBuilder()
-      .setCustomId(`modal_settings_${isDebug ? 'debug' : 'normal'}`)
-      .setTitle(`⏱️ ${isDebug ? 'デバッグ' : '通常'}時間を変更`);
-
-    const inputs = [
-      new TextInputBuilder().setCustomId('day1').setLabel('初日議論時間 (分)').setStyle(TextInputStyle.Short).setValue(current.day1DiscussionMin.toString()),
-      new TextInputBuilder().setCustomId('day2').setLabel('2日目以降議論時間 (分)').setStyle(TextInputStyle.Short).setValue(current.day2DiscussionMin.toString()),
-      new TextInputBuilder().setCustomId('decrease').setLabel('毎日の短縮時間 (分)').setStyle(TextInputStyle.Short).setValue(current.dayDecreaseMin.toString()),
-      new TextInputBuilder().setCustomId('wolf').setLabel('人狼内通時間 (分)').setStyle(TextInputStyle.Short).setValue(current.wolfMeetingMin.toString()),
-      new TextInputBuilder().setCustomId('timeout').setLabel('投票・夜の行動猶予時間 (分)').setStyle(TextInputStyle.Short).setValue(current.actionTimeoutMin.toString())
-    ];
-
-    modal.addComponents(inputs.map(input => new ActionRowBuilder<TextInputBuilder>().addComponents(input)));
-    await interaction.showModal(modal);
-  }
-
-  public static async handleSettingsModal(interaction: ModalSubmitInteraction) {
-    try {
-      if (interaction.customId === 'modal_settings_system') {
-        const voice = interaction.fields.getTextInputValue('voice').toLowerCase();
-        if (voice !== 'male' && voice !== 'female') throw new Error('Invalid Voice');
-        SettingsManager.getInstance().updateSystem({ gmVoice: voice });
-        await interaction.reply({ content: `✅ システム設定を保存しました！`, ephemeral: true });
-        return;
+    // 1. システム設定（音声、モデル、モード等）の変更
+    if (customId === 'settings_voice_select') {
+       SettingsManager.getInstance().updateSystem({ gmVoice: value });
+    } else if (customId === 'settings_mvpmode_select') {
+       SettingsManager.getInstance().updateSystem({ mvpMode: value as any });
+    } else if (customId === 'settings_aimodel_select') {
+       SettingsManager.getInstance().updateSystem({ aiModel: value });
+    } else if (customId === 'settings_aitone_select') {
+       SettingsManager.getInstance().updateSystem({ aiTone: value as any });
+    } 
+    // 2. 時間設定のカテゴリ選択（Modalを開く）
+    else if (customId === 'settings_category_select') {
+      if (value === 'reset_all') {
+         SettingsManager.getInstance().reset();
+         const payload = await this.generateSettingsPayload();
+         await interaction.update(payload);
+         await interaction.followUp({ content: '✅ 全ての設定を初期値にリセットしました。', flags: MessageFlags.Ephemeral });
+         return;
       }
 
-      const isDebug = interaction.customId === 'modal_settings_debug';
-      const newSettings = {
-        day1DiscussionMin: parseFloat(interaction.fields.getTextInputValue('day1')),
-        day2DiscussionMin: parseFloat(interaction.fields.getTextInputValue('day2')),
-        dayDecreaseMin: parseFloat(interaction.fields.getTextInputValue('decrease')),
-        wolfMeetingMin: parseFloat(interaction.fields.getTextInputValue('wolf')),
-        actionTimeoutMin: parseFloat(interaction.fields.getTextInputValue('timeout'))
+      const isDebug = value.includes('debug');
+      const current = SettingsManager.getInstance().get(isDebug);
+      const modal = new ModalBuilder().setCustomId(`modal_${value}`); // e.g. modal_edit_normal_day_night
+
+      if (value.endsWith('day_night')) {
+        modal.setTitle(`☀️ 昼・夜フェーズ (${isDebug ? 'デバッグ' : '通常'})`);
+        modal.addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('day1').setLabel('初日議論時間 (分)').setStyle(TextInputStyle.Short).setValue(current.day1DiscussionMin.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('day2').setLabel('2日目以降議論時間 (分)').setStyle(TextInputStyle.Short).setValue(current.day2DiscussionMin.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('decrease').setLabel('毎日の短縮時間 (分)').setStyle(TextInputStyle.Short).setValue(current.dayDecreaseMin.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('wolf').setLabel('人狼内通時間 (分)').setStyle(TextInputStyle.Short).setValue(current.wolfMeetingMin.toString()))
+        );
+      } else if (value.endsWith('vote_exec')) {
+        modal.setTitle(`🗳️ 投票・処刑フェーズ (${isDebug ? 'デバッグ' : '通常'})`);
+        modal.addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('timeout').setLabel('夜・投票アクション制限時間 (分)').setStyle(TextInputStyle.Short).setValue(current.actionTimeoutMin.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('handraise').setLabel('挙手待ちタイムアウト (秒)').setStyle(TextInputStyle.Short).setValue(current.handRaiseTimeoutSec.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('speech').setLabel('個人の発言時間 (分)').setStyle(TextInputStyle.Short).setValue(current.speechMin.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('lastword').setLabel('遺言の時間 (分)').setStyle(TextInputStyle.Short).setValue(current.lastWordMin.toString()))
+        );
+      } else if (value.endsWith('system_delay')) {
+        modal.setTitle(`⚙️ 演出・システム保持 (${isDebug ? 'デバッグ' : '通常'})`);
+        modal.addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('cleanup_delay').setLabel('終了時の演出ディレイ (分)').setStyle(TextInputStyle.Short).setValue(current.cleanupDelayMin.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('delete_days').setLabel('データ保存日数 (日)').setStyle(TextInputStyle.Short).setValue(current.dataDeletionDays.toString()))
+        );
+      }
+      
+      await interaction.showModal(modal);
+      return; // Modalを表示した場合はここで終了（interaction.updateは呼ばない）
+    }
+
+    // システム設定を変更した場合は画面を即座に更新する
+    const payload = await this.generateSettingsPayload();
+    await interaction.update(payload);
+    await interaction.followUp({ content: `✅ 設定を変更しました！`, flags: MessageFlags.Ephemeral });
+  }
+
+  // 古いボタンが押された時のための後方互換性（クラッシュ防止）
+  public static async handleSettingsButton(interaction: ButtonInteraction) {
+    await interaction.reply({ content: '⚠️ この設定メニューは古いため無効です。再度 `/設定` コマンドを実行してください。', flags: MessageFlags.Ephemeral });
+  }
+
+
+// ===============================================
+  // ⚙️ Modal送信後の設定保存処理
+  // ===============================================
+  public static async handleSettingsModal(interaction: ModalSubmitInteraction) {
+    try {
+      const customId = interaction.customId; // e.g. modal_edit_normal_day_night
+      const isDebug = customId.includes('debug');
+      const newSettings: Partial<GameSettings> = {};
+
+      // 🚨 安全に数値を取り出すヘルパー関数（全角数字や空白にも対応）
+      const parseField = (id: string) => {
+        let val = interaction.fields.getTextInputValue(id).trim();
+        // 全角数字を半角に変換するおもてなし処理
+        val = val.replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+        const parsed = parseFloat(val);
+        if (Number.isNaN(parsed)) throw new Error(`Invalid Number: ${id}`);
+        return parsed;
       };
 
-      if (Object.values(newSettings).some(isNaN)) throw new Error('Invalid Number');
+      if (customId.endsWith('day_night')) {
+        newSettings.day1DiscussionMin = parseField('day1');
+        newSettings.day2DiscussionMin = parseField('day2');
+        newSettings.dayDecreaseMin = parseField('decrease');
+        newSettings.wolfMeetingMin = parseField('wolf');
+      } else if (customId.endsWith('vote_exec')) {
+        newSettings.actionTimeoutMin = parseField('timeout');
+        newSettings.handRaiseTimeoutSec = parseField('handraise');
+        newSettings.speechMin = parseField('speech');
+        newSettings.lastWordMin = parseField('lastword');
+      } else if (customId.endsWith('system_delay')) {
+        newSettings.cleanupDelayMin = parseField('cleanup_delay');
+        newSettings.dataDeletionDays = parseField('delete_days');
+      }
 
       SettingsManager.getInstance().update(isDebug, newSettings);
-      await interaction.reply({ content: `✅ ${isDebug ? 'デバッグ' : '通常'}設定を保存しました！\n(※次回開始・再開されるフェーズから適用されます)`, ephemeral: true });
+      
+      const payload = await CommandHandler.generateSettingsPayload();
+      
+      // 🚨 修正：ビルドエラーを回避しつつ、安全に元の画面を更新する
+      if (interaction.isFromMessage()) {
+        // メッセージから開かれたモーダルの場合、これで更新と応答が同時に完了する
+        await interaction.update(payload);
+        await interaction.followUp({ 
+          content: `✅ ${isDebug ? 'デバッグ' : '通常'}設定を保存しました！`, 
+          flags: MessageFlags.Ephemeral 
+        });
+      } else {
+        // 万が一それ以外のルートだった場合のフォールバック
+        await interaction.reply({ 
+          content: `✅ ${isDebug ? 'デバッグ' : '通常'}設定を保存しました！`, 
+          flags: MessageFlags.Ephemeral 
+        });
+      }
+      
     } catch (e) {
-      await interaction.reply({ content: '❌ 入力値が不正です。時間は半角数値で、声は male または female と入力してください。', ephemeral: true });
+      Logger.error('CommandHandler', '設定保存エラー', e);
+      const errorContent = '❌ 入力値が不正です。時間は半角または全角の数値で入力してください。';
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp({ content: errorContent, flags: MessageFlags.Ephemeral });
+      } else {
+        await interaction.reply({ content: errorContent, flags: MessageFlags.Ephemeral });
+      }
+    }
+  }
+
+  // 🚨 中継テスト終了コマンド
+  public static async handleRelayTestEnd(interaction: ChatInputCommandInteraction) {
+    await interaction.deferReply();
+    VoiceService.disconnectAll('test_mixer_999');
+    await interaction.editReply('✅ 中継テストを終了し、Botを退出させました。');
+  }
+  // ===============================================
+  // 🎛️ 究極ミキサー＆分離録音 テスト用コマンド
+  // ===============================================
+  public static async handleMixerTest(interaction: ChatInputCommandInteraction, gmClient: Client, assistantClient: Client) {
+    await interaction.deferReply();
+    const guildId = interaction.guildId!;
+    const member = interaction.member as GuildMember;
+    const sourceVcId = member.voice.channelId;
+    const targetVcOption = interaction.options.getChannel('送信先vc') as any;
+
+    if (!sourceVcId) return interaction.editReply('❌ 送信元VC（自分がいるVC）に参加してください。');
+    if (!targetVcOption || !targetVcOption.isVoiceBased()) return interaction.editReply('❌ 送信先VCを指定してください。');
+
+    const workers = WorkerManager.getInstance().getWorkers();
+    if (workers.length === 0) return interaction.editReply('❌ バイト君（Worker）が起動していません。中継用Botとして最低1体必要です。');
+    const relayClient = workers[0];
+
+    const testGameId = 'test_mixer_999';
+    
+    try {
+      VoiceService.disconnectAll(testGameId);
+
+      const gmGuild = await gmClient.guilds.fetch(guildId);
+      const astGuild = await assistantClient.guilds.fetch(guildId);
+      const relayGuild = await relayClient.guilds.fetch(guildId);
+
+      const sourceVc = await gmGuild.channels.fetch(sourceVcId) as VoiceBasedChannel;
+      const targetVc = await astGuild.channels.fetch(targetVcOption.id) as VoiceBasedChannel;
+      const sourceVcForRelay = await relayGuild.channels.fetch(sourceVcId) as VoiceBasedChannel;
+
+      const gmConn = await VoiceService.connectWithClient(gmClient, sourceVc, testGameId, 'main');
+      VoiceService.startRecording(gmConn, testGameId);
+      
+      const relayConn = await VoiceService.connectWithClient(relayClient, sourceVcForRelay, testGameId, 'relay_listener');
+
+      const relayWakeUpAudio = await TTSService.generateAudio('中継準備完了', testGameId, 'relay_wakeup');
+      await VoiceService.playAudio(relayConn, relayWakeUpAudio, testGameId);
+      
+      const astConn = await VoiceService.connectWithClient(assistantClient, targetVc, testGameId, 'ghost');
+
+      VoiceService.setupMixerRelayTest(relayConn, astConn, testGameId);
+
+      await interaction.editReply(`✅ **🎛️ ミキサー＆録音分離テストを開始！**\n\n🎙️ **GM** (録音専任): ${sourceVc.name}\n🎧 **Relay** (受信専任): ${sourceVc.name}\n🔊 **Assistant** (再生専任): ${targetVc.name}\n\n複数人で同時に喋って、霊界に混ざって聞こえるか＆録音ファイルが正常に作られるかテストしてください！`);
+    } catch (error) {
+      Logger.error('CommandHandler', 'ミキサーテスト失敗', error);
+      await interaction.editReply('❌ エラーが発生しました。');
     }
   }
 }
