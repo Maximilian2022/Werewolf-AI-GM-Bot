@@ -37,3 +37,12 @@ Botの出すログをホスト側の `./logs/bot.log` ファイルにも永続�
 
 ### 影響範囲と検証
 - 再起動後、ホスト側の `logs/bot.log` に再起動区切りログおよびBotの起動時の全ログが出力されていることを確認しました。
+
+## 2026-07-09 Git リモートリポジトリ（Push先）の変更
+
+### 概要
+GitのPush先リモートリポジトリのURLを `https://github.com/Maximilian2022/Werewolf-AI-GM-Bot` に変更（新規設定）しました。
+
+### 実施した変更
+1. **Gitリモートリポジトリの追加**:
+   - `git remote add origin https://github.com/Maximilian2022/Werewolf-AI-GM-Bot` を実行し、リモート名 `origin` として新しいリポジトリURLを設定しました。
