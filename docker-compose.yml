@@ -1,0 +1,25 @@
+services:
+  werewolf-gm-bot:
+    build: .
+    container_name: werewolf-gm-bot
+    restart: always # サーバー再起動時やクラッシュ時に自動復旧
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Tokyo
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    env_file:
+      - .env
+    network_mode: "host"
+    volumes:
+      # /app/data をホスト側と同期し、JSONや音声データを永続化
+      - ./data:/app/data
+      
+      # GCPの認証用JSONファイルを読み取り専用(ro)でマウント
+      # 事前にホスト側に gcp-key.json を配置しておく必要があります
+      - ./gcp-key.json:/app/gcp-key.json:ro
+      
+      # logs ディレクトリをマウントし、ログファイルを永続化
+      - ./logs:/app/logs
+    tmpfs:
+      - /tmp/werewolf_relay:size=512M
+      
