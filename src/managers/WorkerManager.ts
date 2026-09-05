@@ -22,7 +22,7 @@ export class WorkerManager {
 
   public async renameWorker(worker: Client, serverId: string, roleName: string | null): Promise<void> {
     try {
-      const guild = await worker.guilds.fetch(serverId).catch(() => null);
+      const guild = worker.guilds.cache.get(serverId) || await worker.guilds.fetch(serverId).catch(() => null);
       if (guild && guild.members.me) {
         const index = this.workers.findIndex(w => w.user?.id === worker.user?.id);
         if (index === -1) return;
@@ -50,7 +50,7 @@ export class WorkerManager {
       if (playerIds.includes(worker.user?.id || '')) continue; 
 
       try {
-        const guild = await worker.guilds.fetch(serverId).catch(() => null);
+        const guild = worker.guilds.cache.get(serverId) || await worker.guilds.fetch(serverId).catch(() => null);
         if (guild && guild.members.me) {
           const currentVcId = guild.members.me.voice.channelId;
           if (!currentVcId || currentVcId === ghostVcId) {
@@ -71,7 +71,7 @@ export class WorkerManager {
       if (playerIds.includes(worker.user?.id || '')) continue; 
 
       try {
-        const guild = await worker.guilds.fetch(guildId).catch(() => null);
+        const guild = worker.guilds.cache.get(guildId) || await worker.guilds.fetch(guildId).catch(() => null);
         if (guild && guild.members.me) {
           const currentVcId = guild.members.me.voice.channelId;
           if (currentVcId === ghostVc.id) {

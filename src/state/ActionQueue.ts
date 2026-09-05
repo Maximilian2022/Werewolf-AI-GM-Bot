@@ -45,41 +45,44 @@ export class ActionQueue {
   }
 
   /**
-   * キューを順番に処理
+   * キューを順番に処理（反復ループ）
    */
   private async process(): Promise<void> {
-    if (this.queue.length === 0) {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
+    try {
+      while (this.queue.length > 0) {
+        const task = this.queue.shift();
+        if (!task) continue;
+
+        try {
+          Logger.debug('ActionQueue', `実行開始: [${task.id}]`);
+          await task.execute();
+          Logger.success('ActionQueue', `完了: [${task.id}]`);
+        } catch (error) {
+          Logger.error('ActionQueue', `タスク実行エラー: [${task.id}]`, error);
+          
+          // リトライ処理
+          if (task.retryCount < this.MAX_RETRIES) {
+            task.retryCount++;
+            Logger.warn('ActionQueue', `タスクを再試行します [${task.id}] (${task.retryCount}/${this.MAX_RETRIES})`);
+            this.queue.unshift(task); // 先頭に戻して再試行
+            // レートリミット回復のため、リトライ時は少し長めに待機
+            await this.sleep(this.INTERVAL_MS * task.retryCount);
+          } else {
+            // 最大試行回数を超えた場合は破棄
+            Logger.error('ActionQueue', `最大再試行回数に達しました。タスクを破棄して次の処理へ進みます: [${task.id}]`);
+          }
+        }
+
+        // 次のタスクまで待機（レートリミット回避）
+        await this.sleep(this.INTERVAL_MS);
+      }
+    } finally {
       this.isProcessing = false;
       Logger.debug('ActionQueue', 'キュー内の全てのタスクの処理が完了し、ワーカーが待機状態に入りました');
-      return;
     }
-
-    this.isProcessing = true;
-    const task = this.queue.shift();
-
-    if (task) {
-      try {
-        Logger.debug('ActionQueue', `実行開始: [${task.id}]`);
-        await task.execute();
-        Logger.success('ActionQueue', `完了: [${task.id}]`);
-      } catch (error) {
-        Logger.error('ActionQueue', `タスク実行エラー: [${task.id}]`, error);
-        
-        // リトライ処理
-        if (task.retryCount < this.MAX_RETRIES) {
-          task.retryCount++;
-          Logger.warn('ActionQueue', `タスクを再試行します [${task.id}] (${task.retryCount}/${this.MAX_RETRIES})`);
-          this.queue.unshift(task); // 先頭に戻して再試行
-        } else {
-          // 最大試行回数を超えた場合は破棄
-          Logger.error('ActionQueue', `最大再試行回数に達しました。タスクを破棄して次の処理へ進みます: [${task.id}]`);
-        }
-      }
-    }
-
-    // 次のタスクまで待機（レートリミット回避）
-    await this.sleep(this.INTERVAL_MS);
-    await this.process();
   }
 
   /**

@@ -118,7 +118,7 @@ export class PhaseHandler {
     for (const player of state.players) {
       actionQueue.add(async () => {
         const targetVcId = expected[player.userId];
-        const member = await guild.members.fetch(player.userId).catch(() => null);
+        const member = guild.members.cache.get(player.userId) || await guild.members.fetch(player.userId).catch(() => null);
         if (member) {
           // 🚨 廃村時・終了時にボットはロビーに戻さずVCから切断する
           if (phaseType === 'lobby' && member.user.bot) {
@@ -179,7 +179,7 @@ export class PhaseHandler {
       }));
 
       const roleMapPromises = updatedPlayers.map(async p => {
-        const m = await guild.members.fetch(p.userId).catch(() => null);
+        const m = guild.members.cache.get(p.userId) || await guild.members.fetch(p.userId).catch(() => null);
         return `${m?.displayName || '不明'}:${p.role}`;
       });
       const rolesStr = (await Promise.all(roleMapPromises)).join(', ');
@@ -192,7 +192,7 @@ export class PhaseHandler {
     // 🚨 プレイヤー名に依存するセリフのプリフェッチ (裏で実行)
     (async () => {
       try {
-        const names = (await Promise.all(updatedPlayers.map(p => guild.members.fetch(p.userId).catch(() => null))))
+        const names = (await Promise.all(updatedPlayers.map(p => guild.members.cache.get(p.userId) || guild.members.fetch(p.userId).catch(() => null))))
           .map(m => m?.displayName)
           .filter(n => n) as string[];
         const sm = SettingsManager.getInstance();
@@ -469,7 +469,14 @@ export class PhaseHandler {
         let elapsed = 0;
 
         while (elapsed < totalDiscussionMs) {
-          const currentState = StateManager.getInstance().getState();
+          let currentState: GameState;
+          try {
+            currentState = StateManager.getInstance().getState();
+          } catch {
+            break; // 廃村等でStateが破棄された場合は即座にループ脱出
+          }
+          if (currentState.phase !== 'day_discussion') break;
+
           if (currentState.isPaused) {
               await timerMsg.edit(MSG.CHAT.DAY_TIMER_PAUSED(state.day)).catch(() => {});
               await new Promise(r => setTimeout(r, 2000));
@@ -588,7 +595,7 @@ export class PhaseHandler {
 
     const voteSelect = new StringSelectMenuBuilder().setCustomId('vote_select').setPlaceholder('処刑対象を選択');
     for (const target of alivePlayers) {
-      const targetMember = await guild.members.fetch(target.userId).catch(() => null);
+      const targetMember = guild.members.cache.get(target.userId) || await guild.members.fetch(target.userId).catch(() => null);
       if (targetMember) voteSelect.addOptions({ label: targetMember.displayName, value: target.userId });
     }
     const voteRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(voteSelect);
@@ -722,13 +729,13 @@ export class PhaseHandler {
         uiText += MSG.CHAT.VOTE_UI_NOW(speakerMember.displayName, speakerNote, timeText);
         
         for (const qp of waitQueue) {
-           const qm = await guild.members.fetch(qp.userId).catch(() => null);
+           const qm = guild.members.cache.get(qp.userId) || await guild.members.fetch(qp.userId).catch(() => null);
            uiText += MSG.CHAT.VOTE_UI_WAITING(qm?.displayName || '不明');
         }
 
         for (const up of unvotedPlayers) {
            if (up.userId !== currentSpeaker!.userId && !waitQueue.find(q => q.userId === up.userId)) {
-             const um = await guild.members.fetch(up.userId).catch(() => null);
+             const um = guild.members.cache.get(up.userId) || await guild.members.fetch(up.userId).catch(() => null);
              uiText += MSG.CHAT.VOTE_UI_PENDING(um?.displayName || '不明');
            }
         }
@@ -738,7 +745,7 @@ export class PhaseHandler {
         const counts: Record<string, string[]> = {};
         for (const [vId, tId] of Object.entries(currentVotes)) {
           if (!counts[tId]) counts[tId] = [];
-          const voterM = await guild.members.fetch(vId).catch(() => null);
+          const voterM = guild.members.cache.get(vId) || await guild.members.fetch(vId).catch(() => null);
           const suffix = randomVoterIds.includes(vId) ? ' (ランダム)' : '';
           counts[tId].push(`${voterM?.displayName || '不明'}${suffix}`);
         }
@@ -746,7 +753,7 @@ export class PhaseHandler {
         if (Object.keys(counts).length === 0) uiText += MSG.CHAT.VOTE_UI_NO_VOTES;
         else {
           for (const [tId, voters] of Object.entries(counts)) {
-            const targetM = await guild.members.fetch(tId).catch(() => null);
+            const targetM = guild.members.cache.get(tId) || await guild.members.fetch(tId).catch(() => null);
             uiText += MSG.CHAT.VOTE_UI_VOTE_ITEM(targetM?.displayName || '不明', voters.length, voters.join(', '));
           }
         }
@@ -789,7 +796,7 @@ export class PhaseHandler {
           const candidates = alivePlayers.filter((p: Player) => p.userId !== currentSpeaker!.userId);
           const randomTargetId = candidates[Math.floor(Math.random() * candidates.length)].userId;
           randomVoterIds.push(currentSpeaker!.userId);
-          const targetName = (await guild.members.fetch(randomTargetId)).displayName;
+          const targetName = (guild.members.cache.get(randomTargetId) || await guild.members.fetch(randomTargetId)).displayName;
           await this.sendToPersonalChannel(guild, currentSpeaker!.userId, MSG.CHAT.DM_TIMEOUT_VOTE(targetName));
           
           const newVotes = { ...stateManager.getState().currentVotes, [currentSpeaker!.userId]: randomTargetId };
@@ -811,12 +818,12 @@ export class PhaseHandler {
     const finalCounts: Record<string, string[]> = {};
     for (const [vId, tId] of Object.entries(finalVotes)) {
       if (!finalCounts[tId]) finalCounts[tId] = [];
-      const voterM = await guild.members.fetch(vId).catch(() => null);
+      const voterM = guild.members.cache.get(vId) || await guild.members.fetch(vId).catch(() => null);
       const suffix = randomVoterIds.includes(vId) ? ' (ランダム)' : '';
       finalCounts[tId].push(`${voterM?.displayName || '不明'}${suffix}`);
     }
     for (const [tId, voters] of Object.entries(finalCounts)) {
-      const targetM = await guild.members.fetch(tId).catch(() => null);
+      const targetM = guild.members.cache.get(tId) || await guild.members.fetch(tId).catch(() => null);
       finalUiText += MSG.CHAT.VOTE_UI_VOTE_ITEM(targetM?.displayName || '不明', voters.length, voters.join(', '));
     }
     await statusMsg.edit(finalUiText).catch(() => {});
@@ -1716,7 +1723,7 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
 
     let resultText = MSG.CHAT.SYS_WIN(winningTeam);
     for (const p of state.players) {
-      const name = (await guild.members.fetch(p.userId)).displayName;
+      const name = (guild.members.cache.get(p.userId) || await guild.members.fetch(p.userId).catch(() => null))?.displayName || '不明';
       resultText += `- ${name}: **${p.role}** (${p.isAlive ? '生存' : '死亡'})\n`;
     }
     
@@ -1753,7 +1760,9 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
       
       try {
         const playerNameMap: Record<string, string> = {};
-        for (const p of state.players) playerNameMap[p.userId] = (await guild.members.fetch(p.userId)).displayName;
+        for (const p of state.players) {
+          playerNameMap[p.userId] = (guild.members.cache.get(p.userId) || await guild.members.fetch(p.userId).catch(() => null))?.displayName || '不明なプレイヤー';
+        }
 
         // 🚨 戻り値から wasForcedFallback を受け取る
         const mvpData = await AIService.analyzeMVP(gameId, state.speechLogs, playerNameMap, state.eventLogs);

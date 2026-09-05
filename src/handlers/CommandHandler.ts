@@ -56,8 +56,8 @@ export class CommandHandler {
       .setDescription('下のプルダウンから変更したい項目を選択してください。\n設定が完了すると、この画面は自動で最新の状態に更新されます。')
       .setColor('#2b2d31')
       .addFields(
-        { name: '🟢 通常モード(時間)', value: `議論: ${normal.day1DiscussionMin}分 / ${normal.day2DiscussionMin}分 (短縮${normal.dayDecreaseMin}分)\n内通: ${normal.wolfMeetingMin}分\n行動: ${normal.actionTimeoutMin}分\n発言: ${normal.speechMin}分 / 遺言: ${normal.lastWordMin}分\n挙手待ち: ${normal.handRaiseTimeoutSec}秒`, inline: true },
-        { name: '🐛 デバッグ(時間)', value: `議論: ${debug.day1DiscussionMin}分 / ${debug.day2DiscussionMin}分 (短縮${debug.dayDecreaseMin}分)\n内通: ${debug.wolfMeetingMin}分\n行動: ${debug.actionTimeoutMin}分\n発言: ${debug.speechMin}分 / 遺言: ${debug.lastWordMin}分\n挙手待ち: ${debug.handRaiseTimeoutSec}秒`, inline: true },
+        { name: '🟢 通常モード(時間)', value: `議論: ${normal.day1DiscussionMin}分 / ${normal.day2DiscussionMin}分 (短縮${normal.dayDecreaseMin}分)\n内通: ${normal.wolfMeetingMin}分\n行動: ${normal.actionTimeoutMin}分\n発言: ${normal.speechMin}分 / 遺言: ${normal.lastWordMin}分\n決選弁明: ${normal.runoffDefenseMin}分 / 決選投票: ${normal.runoffVoteTimeoutMin}分\n挙手待ち: ${normal.handRaiseTimeoutSec}秒`, inline: true },
+        { name: '🐛 デバッグ(時間)', value: `議論: ${debug.day1DiscussionMin}分 / ${debug.day2DiscussionMin}分 (短縮${debug.dayDecreaseMin}分)\n内通: ${debug.wolfMeetingMin}分\n行動: ${debug.actionTimeoutMin}分\n発言: ${debug.speechMin}分 / 遺言: ${debug.lastWordMin}分\n決選弁明: ${debug.runoffDefenseMin}分 / 決選投票: ${debug.runoffVoteTimeoutMin}分\n挙手待ち: ${debug.handRaiseTimeoutSec}秒`, inline: true },
         { name: '🎙️ システム・演出設定', value: `データ保持: ${normal.dataDeletionDays}日 / 終了ディレイ: ${normal.cleanupDelayMin}分\nGMの声: **${sys.gmVoice}**\nAIモデル: **${sys.aiModel}**\nMVPモード: **${sys.mvpMode}**\nAIトーン: **${sys.aiTone}**`, inline: false }
       );
 
@@ -69,9 +69,11 @@ export class CommandHandler {
         .addOptions([
           { label: '☀️ 昼・夜フェーズ (通常)', value: 'edit_normal_day_night' },
           { label: '🗳️ 投票・処刑フェーズ (通常)', value: 'edit_normal_vote_exec' },
+          { label: '⚖️ 決選投票フェーズ (通常)', value: 'edit_normal_runoff' },
           { label: '⚙️ 演出・データ保持 (通常)', value: 'edit_normal_system_delay' },
           { label: '🐛 昼・夜フェーズ (デバッグ)', value: 'edit_debug_day_night' },
           { label: '🐛 投票・処刑フェーズ (デバッグ)', value: 'edit_debug_vote_exec' },
+          { label: '🐛 決選投票フェーズ (デバッグ)', value: 'edit_debug_runoff' },
           { label: '🐛 演出・データ保持 (デバッグ)', value: 'edit_debug_system_delay' },
           { label: '⚠️ 全ての設定を初期化 (リセット)', value: 'reset_all' }
         ])
@@ -462,7 +464,7 @@ export class CommandHandler {
       const playerNameMap: Record<string, string> = {};
       for (const p of state.players) {
           try {
-              const member = await interaction.guild!.members.fetch(p.userId);
+              const member = interaction.guild!.members.cache.get(p.userId) || await interaction.guild!.members.fetch(p.userId);
               playerNameMap[p.userId] = member.displayName;
           } catch (e) {
               playerNameMap[p.userId] = '不明なプレイヤー';
@@ -581,6 +583,12 @@ export class CommandHandler {
           new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('speech').setLabel('個人の発言時間 (分)').setStyle(TextInputStyle.Short).setValue(current.speechMin.toString())),
           new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('lastword').setLabel('遺言の時間 (分)').setStyle(TextInputStyle.Short).setValue(current.lastWordMin.toString()))
         );
+      } else if (value.endsWith('runoff')) {
+        modal.setTitle(`⚖️ 決選投票フェーズ (${isDebug ? 'デバッグ' : '通常'})`);
+        modal.addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('runoff_defense').setLabel('決選弁明時間 (分)').setStyle(TextInputStyle.Short).setValue(current.runoffDefenseMin.toString())),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId('runoff_vote').setLabel('決選投票時間 (分)').setStyle(TextInputStyle.Short).setValue(current.runoffVoteTimeoutMin.toString()))
+        );
       } else if (value.endsWith('system_delay')) {
         modal.setTitle(`⚙️ 演出・システム保持 (${isDebug ? 'デバッグ' : '通常'})`);
         modal.addComponents(
@@ -634,6 +642,9 @@ export class CommandHandler {
         newSettings.handRaiseTimeoutSec = parseField('handraise');
         newSettings.speechMin = parseField('speech');
         newSettings.lastWordMin = parseField('lastword');
+      } else if (customId.endsWith('runoff')) {
+        newSettings.runoffDefenseMin = parseField('runoff_defense');
+        newSettings.runoffVoteTimeoutMin = parseField('runoff_vote');
       } else if (customId.endsWith('system_delay')) {
         newSettings.cleanupDelayMin = parseField('cleanup_delay');
         newSettings.dataDeletionDays = parseField('delete_days');

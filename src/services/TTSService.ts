@@ -103,6 +103,9 @@ export class TTSService {
     })();
   }
 
+  // 同一音声リクエストの多重実行を防止するIn-Flightキャッシュ
+  private static inFlightRequests = new Map<string, Promise<string>>();
+
   // ゲーム開始時にプレイヤー名に依存するセリフを一括でプリフェッチする
   public static prefetchDynamicAudios(playerNames: string[], normalSet: any, debugSet: any) {
     (async () => {
@@ -127,10 +130,14 @@ export class TTSService {
           const normalSpeechMinStr = normalSet.speechMin >= 1 ? `${Math.floor(normalSet.speechMin)}分` : `${Math.round(normalSet.speechMin * 60)}秒`;
           const debugSpeechMinStr = debugSet.speechMin >= 1 ? `${Math.floor(debugSet.speechMin)}分` : `${Math.round(debugSet.speechMin * 60)}秒`;
           
+          const normalDefenseStr = (normalSet.runoffDefenseMin ?? 1) >= 1 ? `${Math.floor(normalSet.runoffDefenseMin ?? 1)}分間` : `${Math.round((normalSet.runoffDefenseMin ?? 1) * 60)}秒間`;
+          const debugDefenseStr = (debugSet.runoffDefenseMin ?? 0.083) >= 1 ? `${Math.floor(debugSet.runoffDefenseMin ?? 0.083)}分間` : `${Math.round((debugSet.runoffDefenseMin ?? 0.083) * 60)}秒間`;
+
           texts.push(
             MSG.VOICE.VOTE_START(name, normalSpeechMinStr),
             MSG.VOICE.VOTE_START(name, debugSpeechMinStr),
-            MSG.VOICE.RUNOFF_DEFENSE_START(name, '1分') // 固定で1分としている箇所
+            MSG.VOICE.RUNOFF_DEFENSE_START(name, normalDefenseStr),
+            MSG.VOICE.RUNOFF_DEFENSE_START(name, debugDefenseStr)
           );
         }
 
@@ -162,28 +169,38 @@ export class TTSService {
       return cachedFilePath;
     }
 
-    Logger.info('TTSService', `🌐 APIリクエスト生成(MP3): [${identifier}]`, gameId);
-
-    const request = {
-      input: { text: text },
-      voice: { languageCode: 'ja-JP', name: voiceName },
-      audioConfig: {
-        // 🚨 修正3: OGG_OPUS をやめて、Discordが誤解しない MP3 を要求する
-        audioEncoding: 'MP3' as const
-        // ※MP3ならFFmpegが自動で最適化してくれるため、sampleRateHertz の指定も不要になります
-      },
-    };
-
-    try {
-      const audioContent = await this.fetchAudioWithRetry(request, gameId);
-      const writeFile = util.promisify(fs.writeFile);
-      await writeFile(cachedFilePath, audioContent, 'binary');
-      Logger.success('TTSService', `✅ 新規音声保存完了: ${hash}.mp3`, gameId);
-      return cachedFilePath;
-    } catch (error) {
-      Logger.error('TTSService', '❌ ❌ TTS生成に完全に失敗しました。進行を継続するため再生をスキップします。', error, gameId);
-      return '';
+    // 同一テキストへのリクエストが既に実行中（In-Flight）ならそのPromiseを共有する
+    if (this.inFlightRequests.has(hash)) {
+      Logger.info('TTSService', `⚡ In-Flightリクエスト合流: [${identifier}]`, gameId);
+      return this.inFlightRequests.get(hash)!;
     }
+
+    const taskPromise = (async () => {
+      Logger.info('TTSService', `🌐 APIリクエスト生成(MP3): [${identifier}]`, gameId);
+
+      const request = {
+        input: { text: text },
+        voice: { languageCode: 'ja-JP', name: voiceName },
+        audioConfig: {
+          audioEncoding: 'MP3' as const
+        },
+      };
+
+      try {
+        const audioContent = await this.fetchAudioWithRetry(request, gameId);
+        await fs.promises.writeFile(cachedFilePath, Buffer.from(audioContent));
+        Logger.success('TTSService', `✅ 新規音声保存完了: ${hash}.mp3`, gameId);
+        return cachedFilePath;
+      } catch (error) {
+        Logger.error('TTSService', '❌ ❌ TTS生成に完全に失敗しました。進行を継続するため再生をスキップします。', error, gameId);
+        return '';
+      } finally {
+        this.inFlightRequests.delete(hash);
+      }
+    })();
+
+    this.inFlightRequests.set(hash, taskPromise);
+    return taskPromise;
   }
 
 }

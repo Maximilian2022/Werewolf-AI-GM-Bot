@@ -102,7 +102,11 @@ export class VoiceService {
     if (!filePath) return;
     return new Promise(async (resolve) => {      
       if (connection.state.status === VoiceConnectionStatus.Disconnected) {
-          try { connection.rejoin(); await entersState(connection, VoiceConnectionStatus.Connecting, 5000); } catch (e) {}
+          try { 
+            connection.rejoin(); 
+            await entersState(connection, VoiceConnectionStatus.Connecting, 5000); 
+            (connection as any)._hasPlayedOnce = false;
+          } catch (e) {}
       }
       const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
       
@@ -114,12 +118,15 @@ export class VoiceService {
         connection.subscribe(player);
         (connection as any)._isBusy = true;
         
-        // 頭切れ対策: コネクション確立後、音声パケットを流す前に1秒待機してクライアントの同期を待つ
-        await new Promise(r => setTimeout(r, 1000));
+        // 初回接続時のみクライアント同期待ち(500ms)、安定接続時は安全マージン(300ms)として頭切れを完全防止しつつ快適なテンポを両立
+        const waitMs = (connection as any)._hasPlayedOnce ? 300 : 500;
+        await new Promise(r => setTimeout(r, waitMs));
+        (connection as any)._hasPlayedOnce = true;
         
         player.play(resource);
       } catch (err) { 
         (connection as any)._isBusy = false;
+        try { player.removeAllListeners(); } catch {}
         resolve(); 
         return; 
       }
@@ -130,6 +137,7 @@ export class VoiceService {
           isResolved = true;
           (connection as any)._isBusy = false;
           clearTimeout(timeout);
+          try { player.removeAllListeners(); } catch {}
           resolve();
         }
       };
@@ -138,6 +146,7 @@ export class VoiceService {
             isResolved = true; 
             (connection as any)._isBusy = false; 
             try { player.stop(); } catch (e) {}
+            try { player.removeAllListeners(); } catch {}
             resolve(); 
           }
       }, timeoutMs);

@@ -73,12 +73,16 @@ export class StateManager {
     this.isSaving = true;
     this.pendingSave = false;
     const filePath = path.join(this.saveDir, `${this.state.gameId}.json`);
+    const tempFilePath = path.join(this.saveDir, `${this.state.gameId}.json.tmp`);
     const data = JSON.stringify(this.state, null, 2);
 
     try {
-      await fs.promises.writeFile(filePath, data, 'utf-8');
+      await fs.promises.writeFile(tempFilePath, data, 'utf-8');
+      await fs.promises.rename(tempFilePath, filePath);
     } catch (error) {
       Logger.error('StateManager', `Stateの保存に失敗しました: ${this.state.gameId}.json`, error, this.state.gameId);
+      // 万が一一時ファイルが残っていた場合のクリーンアップ
+      try { await fs.promises.unlink(tempFilePath); } catch {}
     } finally {
       this.isSaving = false;
       // 予約があれば再度実行する
@@ -108,8 +112,12 @@ export class StateManager {
 
   public deleteSaveFile(gameId: string): void {
     const filePath = path.join(this.saveDir, `${gameId}.json`);
+    const tempFilePath = path.join(this.saveDir, `${gameId}.json.tmp`);
     if (fs.existsSync(filePath)) {
       try { fs.unlinkSync(filePath); } catch (e) {}
+    }
+    if (fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
     }
   }
 }

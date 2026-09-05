@@ -267,8 +267,9 @@ async function bootstrap() {
   // 1. 設定のロード
   SettingsManager.getInstance().load();
 
-  // 2. お掃除サービスの実行 (1週間経過したデータの自動削除)
+  // 2. お掃除サービスの実行 (1週間経過したデータの自動削除) と定期スケジュール開始
   CleanupService.run();
+  CleanupService.startSchedule();
 
   // 3. バイト（Worker）Botの初期化とログイン
   const workerTokens = process.env.WORKER_TOKENS ? process.env.WORKER_TOKENS.split(',') : [];

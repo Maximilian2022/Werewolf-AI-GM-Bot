@@ -55,7 +55,7 @@ export class VCWatcher {
     if (!state || state.phase === 'setup' || state.phase === 'finished') return;
 
     try {
-      const guild = await gmClient.guilds.fetch(state.serverId).catch(() => null);
+      const guild = gmClient.guilds.cache.get(state.serverId) || await gmClient.guilds.fetch(state.serverId).catch(() => null);
       if (!guild) return;
 
       const workers = WorkerManager.getInstance().getWorkers();
@@ -68,10 +68,9 @@ export class VCWatcher {
         const expectedVcId = expected[player.userId];
         if (!expectedVcId) continue;
 
-        const member = await guild.members.fetch(player.userId).catch(() => null);
-        if (!member) continue;
-
-        const currentVcId = member.voice.channelId;
+        // 🚨 修正：キャッシュからVoiceStateを瞬時に取得（REST APIリクエストゼロ）
+        const voiceState = guild.voiceStates.cache.get(player.userId);
+        const currentVcId = voiceState?.channelId;
 
         if (currentVcId !== expectedVcId) {
           const isWorker = workers.some(w => w.user?.id === player.userId);
@@ -83,7 +82,10 @@ export class VCWatcher {
           } else {
             // 人間のプレイヤーが意図せず部屋を出ていたら、VCに接続している場合のみ強制送還
             if (currentVcId) {
-               await member.voice.setChannel(expectedVcId).catch(() => {});
+              const member = guild.members.cache.get(player.userId) || await guild.members.fetch(player.userId).catch(() => null);
+              if (member) {
+                await member.voice.setChannel(expectedVcId).catch(() => {});
+              }
             }
           }
         }
@@ -92,7 +94,7 @@ export class VCWatcher {
       // ===============================================
       // 2. アシスタントBot（霊界でのシステム音声転送専任）の監視・修復
       // ===============================================
-      const astGuild = await assistantClient.guilds.fetch(state.serverId).catch(() => null);
+      const astGuild = assistantClient.guilds.cache.get(state.serverId) || await assistantClient.guilds.fetch(state.serverId).catch(() => null);
       if (astGuild && astGuild.members.me) {
         const astCurrentVcId = astGuild.members.me.voice.channelId;
         
@@ -109,7 +111,7 @@ export class VCWatcher {
       const currentGhostWorkers: Client[] = [];
       const availableWorkersPool: Client[] = [];
 
-      // 全Workerの状態をスキャン
+      // 全Workerの状態をスキャン（キャッシュ優先）
       for (const worker of workers) {
         const workerId = worker.user?.id;
         if (!workerId) continue;
@@ -121,7 +123,7 @@ export class VCWatcher {
         const conn = VoiceService.getConnection(state.gameId, workerId);
         if (conn && (conn as any)._isBusy) continue;
 
-        const wGuild = await worker.guilds.fetch(state.serverId).catch(() => null);
+        const wGuild = worker.guilds.cache.get(state.serverId) || await worker.guilds.fetch(state.serverId).catch(() => null);
         if (wGuild && wGuild.members.me) {
           const currentVcId = wGuild.members.me.voice.channelId;
           if (currentVcId === state.ghostVcId) {
@@ -147,8 +149,8 @@ export class VCWatcher {
           if (availableWorkersPool.length === 0) break;
           const workerToRestore = availableWorkersPool.shift()!;
           try {
-            const wGuild = await workerToRestore.guilds.fetch(state.serverId);
-            const ghostVc = await wGuild.channels.fetch(state.ghostVcId).catch(() => null) as VoiceBasedChannel;
+            const wGuild = workerToRestore.guilds.cache.get(state.serverId) || await workerToRestore.guilds.fetch(state.serverId);
+            const ghostVc = (wGuild.channels.cache.get(state.ghostVcId) || await wGuild.channels.fetch(state.ghostVcId).catch(() => null)) as VoiceBasedChannel;
             
             if (ghostVc && ghostVc.isVoiceBased()) {
               await VoiceService.connectWithClient(workerToRestore, ghostVc, state.gameId, `watcher_fix_relay_${i}`);
@@ -161,10 +163,10 @@ export class VCWatcher {
       }
 
       // ===============================================
-      // 4. 昼議論中の重要管理Bot（GM Bot, マイクBot, 書記Bot）の監視・修復
+      // 4. 昼議論中の重要管理Bot（GM Bot, 書記Bot）の監視・修復
       // ===============================================
       if (state.phase === 'day_discussion') {
-        const mainVc = await guild.channels.fetch(state.mainVcId).catch(() => null) as VoiceBasedChannel | null;
+        const mainVc = (guild.channels.cache.get(state.mainVcId) || await guild.channels.fetch(state.mainVcId).catch(() => null)) as VoiceBasedChannel | null;
         if (mainVc && mainVc.isVoiceBased()) {
           // A. GM Botの接続監視と修復
           const gmConnection = VoiceService.getConnection(state.gameId, gmClient.user?.id || '');
@@ -196,8 +198,6 @@ export class VCWatcher {
               }
             }
           }
-
-          // マイクBotの接続監視・修復処理は廃止されました
         }
       }
 

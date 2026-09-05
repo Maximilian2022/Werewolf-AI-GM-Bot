@@ -16,6 +16,24 @@ export class CleanupService {
   private static readonly GAMES_DIR = path.join(process.cwd(), 'data', 'games');
   private static readonly AUDIO_DIR = path.join(process.cwd(), 'data', 'audio');
 
+  private static scheduleTimer: NodeJS.Timeout | null = null;
+
+  public static startSchedule(): void {
+    if (this.scheduleTimer) return;
+    // 24時間ごとに定期クリーンアップを実行
+    this.scheduleTimer = setInterval(() => {
+      this.run();
+    }, 24 * 60 * 60 * 1000);
+    Logger.system('🧹 クリーンアップサービスの定期スケジュール(24時間周期)を開始しました。');
+  }
+
+  public static stopSchedule(): void {
+    if (this.scheduleTimer) {
+      clearInterval(this.scheduleTimer);
+      this.scheduleTimer = null;
+    }
+  }
+
   public static run() {
     // 🚨 設定値から保存期間（日数）を取得
     const normalSettings = SettingsManager.getInstance().get(false);
@@ -29,6 +47,7 @@ export class CleanupService {
     let deletedCount = 0;
     const now = Date.now();
     const files = fs.readdirSync(this.GAMES_DIR);
+    const deletedGameIds: string[] = [];
 
     for (const file of files) {
       if (!file.endsWith('.json')) continue;
@@ -40,24 +59,34 @@ export class CleanupService {
 
         if (now - endedAt > deletionMs) {
           const gameId = data.gameId;
-          // セーブデータを削除
+          // セーブデータを削除（一時ファイルも含む）
           fs.unlinkSync(filePath);
-          
-          // 関連する音声ファイルを一掃
-          if (fs.existsSync(this.AUDIO_DIR)) {
-            const audioFiles = fs.readdirSync(this.AUDIO_DIR);
-            for (const audioFile of audioFiles) {
-              if (audioFile.startsWith(`${gameId}_`)) {
-                fs.unlinkSync(path.join(this.AUDIO_DIR, audioFile));
-              }
-            }
+          const tmpFilePath = `${filePath}.tmp`;
+          if (fs.existsSync(tmpFilePath)) {
+            try { fs.unlinkSync(tmpFilePath); } catch {}
           }
+          deletedGameIds.push(gameId);
           deletedCount++;
         }
       } catch (e) {
         Logger.warn('Cleanup', `ファイルの読み込みに失敗しました: ${file}`);
       }
     }
+
+    // 削除されたゲームに関連する音声ファイルを一括走査して削除
+    if (deletedGameIds.length > 0 && fs.existsSync(this.AUDIO_DIR)) {
+      try {
+        const audioFiles = fs.readdirSync(this.AUDIO_DIR);
+        for (const audioFile of audioFiles) {
+          if (deletedGameIds.some(gameId => audioFile.startsWith(`${gameId}_`))) {
+            try { fs.unlinkSync(path.join(this.AUDIO_DIR, audioFile)); } catch {}
+          }
+        }
+      } catch (e) {
+        Logger.warn('Cleanup', `音声ファイルの一括削除中にエラーが発生しました`);
+      }
+    }
+
     Logger.success('Cleanup', `✅ クリーンアップ完了: ${deletedCount} 件の古いゲーム環境を削除しました。`);
   }
 }

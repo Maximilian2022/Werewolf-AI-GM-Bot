@@ -34,7 +34,7 @@ export class AIService {
     'execution': '処刑前の遺言', 'night': '夜の行動時', 'finished': 'ゲーム終了後'
   };
 
-  private static buildPromptParts(mode: 'discussion' | 'contribution', speechLogs: SpeechLog[], playerNameMap: Record<string, string>, eventLogs: string[], tone: string): any[] {
+  private static async buildPromptParts(mode: 'discussion' | 'contribution', speechLogs: SpeechLog[], playerNameMap: Record<string, string>, eventLogs: string[], tone: string): Promise<any[]> {
     const isContribution = mode === 'contribution';
     let personaInstruction = '';
     switch (tone) {
@@ -54,16 +54,25 @@ export class AIService {
     if (isContribution && eventLogs.length > 0) promptText += `\n【システムログ（確定情報）】\n${eventLogs.join('\n')}\n`;
 
     const parts: any[] = [{ text: promptText }];
-    for (const log of speechLogs) {
-      if (fs.existsSync(log.audioFilePath)) {
-        let mimeType = 'audio/ogg';
-        if (log.audioFilePath.endsWith('.mp3')) {
-          mimeType = 'audio/mp3';
-        } else if (log.audioFilePath.endsWith('.wav')) {
-          mimeType = 'audio/wav';
+    const audioPromises = speechLogs.map(async (log) => {
+      try {
+        if (fs.existsSync(log.audioFilePath)) {
+          let mimeType = 'audio/ogg';
+          if (log.audioFilePath.endsWith('.mp3')) {
+            mimeType = 'audio/mp3';
+          } else if (log.audioFilePath.endsWith('.wav')) {
+            mimeType = 'audio/wav';
+          }
+          const buffer = await fs.promises.readFile(log.audioFilePath);
+          return { inlineData: { data: buffer.toString('base64'), mimeType } };
         }
-        parts.push({ inlineData: { data: fs.readFileSync(log.audioFilePath).toString('base64'), mimeType } });
-      }
+      } catch (e) {}
+      return null;
+    });
+
+    const loadedAudios = await Promise.all(audioPromises);
+    for (const audio of loadedAudios) {
+      if (audio) parts.push(audio);
     }
     return parts;
   }
@@ -136,7 +145,7 @@ export class AIService {
         const modelId = currentChain[i];
         try {
           Logger.info('AIService', `🚀 [${targetMode}] モデル [${modelId}] でリクエスト送信中...`, gameId);
-          const contents = this.buildPromptParts(targetMode, speechLogs, playerNameMap, eventLogs, tone);
+          const contents = await this.buildPromptParts(targetMode, speechLogs, playerNameMap, eventLogs, tone);
           return await this.ai.models.generateContent({ model: modelId, contents: contents });
         } catch (error: any) {
           lastError = error;
@@ -168,8 +177,19 @@ export class AIService {
     };
 
     const parseJSON = (rawText: string) => {
-      try { return JSON.parse(rawText.replace(/```json/g, '').replace(/```/g, '').trim()); } 
-      catch (e) { return { mvpName: '不明', text: rawText }; }
+      try {
+        const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+        return JSON.parse(cleaned);
+      } catch (e1) {
+        // モデルが前後に解説文や思考テキストを出力した場合の正規表現フォールバック
+        const match = rawText.match(/\{[\s\S]*\}/);
+        if (match) {
+          try {
+            return JSON.parse(match[0]);
+          } catch (e2) {}
+        }
+        return { mvpName: '不明', text: rawText };
+      }
     };
 
     if (mode === 'compare') {
