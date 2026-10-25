@@ -574,6 +574,18 @@ GitHub Dependabot の自動更新設定（`.github/dependabot.yml`）を新設�
    - CodeQL の全6件のアラート完全解決（CWE-338, CWE-770, CWE-352, CWE-614 すべて fixed）。
    - GitHub Release v1.0.1 を作成・公開。
 
+## 2026-10-25 main ブランチ保護ルール (Branch Protection) の有効化
+
+### 概要
+GitHub リポジトリの安全保護のため、`main` ブランチに対して事故防止ルールを適用しました。開発利便性を損なわないよう、1人開発での直接プッシュは許可したまま、破壊的な操作（誤削除・強制プッシュ）のみを禁止する最適な設定を導入しました。
+
+### 実施した変更
+1. **ブランチ保護ルールの適用 (`branches/main/protection`)**:
+   - `allow_force_pushes: false`: 強制プッシュ（`git push --force`）による過去コミット履歴の上書き消去を禁止。
+   - `allow_deletions: false`: 誤操作による `main` ブランチの削除を禁止。
+   - `required_pull_request_reviews: null`: 個人開発時の直接プッシュ（`git push origin main`）は引き続き許可。
+
+
 
 
 
