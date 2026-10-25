@@ -1,6 +1,6 @@
 {
   "name": "werewolf-gm-bot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Discord Voice-based Werewolf GM Bot with Gemini AI",
   "main": "dist/index.js",

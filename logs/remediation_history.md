@@ -566,12 +566,14 @@ GitHub Dependabot の自動更新設定（`.github/dependabot.yml`）を新設�
 1. **Dependabot 設定の新設 (`.github/dependabot.yml`)**:
    - npm、Docker、GitHub Actions の3つのエコシステムについて週次（月曜朝9時JST）の自動依存関係チェック・PR作成ルールを定義。
    - `@types/*`、`typescript` 等の開発依存関係をグループ化してPRを束ねる設定を追加。
-2. **Cookie セキュア属性のリテラル強制 (`src/server/app.ts`)**:
-   - CodeQL の静的解析エンジンが確実に SSL 暗号化強制を認識できるよう、`cookie.secure` を `true` リテラルに指定（Alert #6 の完全解消）。
-4. **依存関係の全脆弱性解消 (`package-lock.json`, npm audit fix)**:
+3. **依存関係の全脆弱性解消 (`package-lock.json`, npm audit fix)**:
    - `npm audit fix` により、`undici` (v6.29.1)、`@grpc/grpc-js` (v1.14.5)、`brace-expansion` (v2.1.7)、`protobufjs` (v7.6.6)、`esbuild` (v0.28.1) のセキュリティパッチを適用。
    - npm 監査による脆弱性を 7 件から「0 件 (found 0 vulnerabilities)」へ完全解消。
-   - 本番コンテナ内にも同期・適用し、無停止で正常稼働を維持。
+   - GitHub Dependabot のオープンな脆弱性アラート全22件がすべて `fixed` に遷移。
+4. **v1.0.1 正式セキュリティリリース**:
+   - CodeQL の全6件のアラート完全解決（CWE-338, CWE-770, CWE-352, CWE-614 すべて fixed）。
+   - GitHub Release v1.0.1 を作成・公開。
+
 
 
 
