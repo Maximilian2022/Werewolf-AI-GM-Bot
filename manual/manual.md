@@ -17,6 +17,7 @@
 9. [AI総評・感想戦分析エンジン（AIService）](#9-ai総評感想戦分析エンジンaiservice)
 10. [Webダッシュボード＆API仕様](#10-webダッシュボードapi仕様)
 11. [Discordスラッシュコマンド仕様](#11-discordスラッシュコマンド仕様)
+12. [Zoomミーティング連携システム仕様（ZoomService）](#12-zoomミーティング連携システム仕様zoomservice)
 
 ---
 
@@ -33,6 +34,12 @@ flowchart TB
         PrivateVC["個別待機VC 1〜N"]
         MainText["投票/通知チャンネル"]
         PrivateText["個別DMチャンネル 1〜N"]
+    end
+
+    subgraph Zoom["Zoom Platform (Meeting SDK)"]
+        ZoomMain["メインルーム (昼議論)"]
+        ZoomBO["ブレイクアウトルーム (人狼/霊界/個室)"]
+        ZoomChat["ミーティング内チャット (!開始等)"]
     end
 
     subgraph BotCluster["Bot Cluster (18 Clients)"]
@@ -52,6 +59,8 @@ flowchart TB
     subgraph Services["Support Services"]
         TTSService["TTSService (Google Cloud TTS)"]
         VoiceService["VoiceService (Discord.js Voice & DAVE)"]
+        ZoomService["ZoomService (SDK接続 & BOルーム制御)"]
+        ZoomProfMgr["ZoomProfileManager (署名生成 & 鍵管理)"]
         AIService["AIService (Gemini AI 総評)"]
         RegManager["RegulationManager (配役・ルール管理)"]
         WorkerManager["WorkerManager (空きBotプール管理)"]
@@ -64,6 +73,8 @@ flowchart TB
     end
 
     Discord <--> BotCluster
+    Zoom <--> ZoomService
+    ZoomService <--> ZoomProfMgr
     BotCluster <--> CoreEngine
     CoreEngine <--> Services
     ExpressApp <--> Services
@@ -387,6 +398,17 @@ Express 5ベースのWebサーバー（デフォルトポート: 3000）が稼�
 | `POST` | `/api/system-settings` | 全体システム設定の更新 | 管理者のみ |
 | `GET` | `/api/tunnel` | Cloudflare Tunnel のステータス・公開URL取得 | 管理者のみ |
 | `GET` | `/api/ai-models` | 利用可能なGeminiモデル動的一覧取得 | 要 |
+| `GET` | `/api/zoom/profiles` | 登録済みZoomプロファイル一覧（Secretマスク）取得 | 要 |
+| `POST` | `/api/zoom/profiles` | Zoomプロファイル（Client ID/Secret）の作成・更新 | 要 |
+| `DELETE` | `/api/zoom/profiles/:id` | Zoomプロファイルの削除 | 要 |
+| `GET` | `/api/zoom/status` | Zoom接続状態、参加者一覧、チャットログ取得 | 要 |
+| `POST` | `/api/zoom/parse-url` | Zoom招待URLからミーティング番号とパスコードを抽出 | 要 |
+| `POST` | `/api/zoom/join` | ZoomミーティングへのBot参加（召喚）実行 | 要 |
+| `POST` | `/api/zoom/leave` | Zoomミーティングからの退出実行 | 要 |
+| `POST` | `/api/zoom/chat` | ミーティング内チャットへのメッセージ送信 | 要 |
+| `POST` | `/api/zoom/mock/start` | 仮想参加者シミュレータの起動 | 要 |
+| `POST` | `/api/zoom/mock/stop` | 仮想参加者シミュレータの停止 | 要 |
+| `POST` | `/api/zoom/mock/chat` | 仮想参加者によるダミーチャット送信 | 要 |
 | `GET` | `/ws/logs` | リアルタイムシステムログストリーミング (WebSocket) | 管理者のみ |
 
 ---
@@ -415,3 +437,105 @@ Express 5ベースのWebサーバー（デフォルトポート: 3000）が稼�
 
 ### 6. `/再解析`
 - **概要**: 直前のゲームログをもとに、現在のシステム設定（モデル・トーン・評価モード）でAI総評を再実行します。
+
+---
+
+## 12. Zoomミーティング連携システム仕様（ZoomService）
+
+本システムは、Discord だけでなく **Zoom ミーティング** 上での人狼ゲーム進行・司会を完全自動で行う連携機能を備えています。Zoom Meeting SDK を介してBotがミーティングへ自律参加し、音声アナウンス、チャットコマンドの受付、およびブレイクアウトルームを活用した夜フェーズの個別移動制御を実現します。
+
+### 12.1 必須前提条件・利用制約（Client ID & Secret）
+
+> [!IMPORTANT]
+> **Zoom連携における開発者キーの必須制限事項**  
+> ZoomミーティングへBotを参加（召喚）させるためには、**参加者またはグループ内に最低1人、「Zoom App Marketplace（https://marketplace.zoom.us/）」にて Meeting SDK App を作成し、Client ID（SDK Key）と Client Secret を取得しているユーザーが存在する必要があります。**  
+> - 取得した認証情報は、Webダッシュボードの「Zoom連携」タブ内「プロファイル管理」から登録します。
+> - 登録データはサーバーローカルの `data/zoom_profiles.json` に安全にアトミック保存され、API返却時には Client Secret が自動的にマスク処理（`****xxxx`）されます。
+> - ミーティング主催者（ホスト）がこのキーを所持している必要はなく、参加者の誰か1人が登録していれば問題ありません。
+
+---
+
+### 12.2 ZoomProfileManager と署名生成アーキテクチャ
+
+`src/managers/ZoomProfileManager.ts` は、Zoom Meeting SDK 接続時に必要な JWT 署名（HMAC-SHA256）を自律生成します。
+
+```mermaid
+sequenceDiagram
+    participant WebUI as Webダッシュボード
+    participant ProfMgr as ZoomProfileManager
+    participant ZoomSvc as ZoomService
+    participant ZoomAPI as Zoom Meeting Platform
+
+    WebUI->>ProfMgr: プロファイル登録 (clientId, clientSecret, defaultHostKey)
+    ProfMgr-->>ProfMgr: data/zoom_profiles.json へアトミック保存
+    WebUI->>ZoomSvc: ミーティング参加リクエスト (profileId, meetingNumber, passcode)
+    ZoomSvc->>ProfMgr: generateSignature(profileId, meetingNumber, role)
+    Note over ProfMgr: JWT Header (HS256) & Payload 生成<br>HMAC-SHA256(clientSecret) 署名
+    ProfMgr-->>ZoomSvc: 生成された JWT 署名文字列
+    ZoomSvc->>ZoomAPI: Meeting SDK 経由でミーティングへ接続・入室
+    ZoomAPI-->>ZoomSvc: 接続確立・参加者イベント受信
+```
+
+#### JWT署名ペイロード仕様
+- **alg**: `HS256` / **typ**: `JWT`
+- **sdkKey / appKey**: 登録された `clientId`
+- **mn**: 空白を除去したミーティング番号
+- **role**: `0`（一般参加者）または `1`（ホストキー指定時のホスト権限）
+- **iat**: 現在時刻 - 30秒（クロックスキュー許容）
+- **exp / tokenExp**: 発行から2時間有効
+
+---
+
+### 12.3 ZoomService ライフサイクルと状態管理
+
+`src/services/ZoomService.ts` は、シングルトンとして以下の状態遷移を管理します。
+
+| 状態フィールド | 型 | 説明 |
+| :--- | :--- | :--- |
+| `isConnected` | boolean | Zoomミーティングへ正常接続中かどうか |
+| `isConnecting` | boolean | 接続処理シーケンスの実行中フラグ |
+| `isHostOrCoHost`| boolean | ホストキー認証等により管理権限を保持しているか |
+| `participants` | ZoomParticipant[] | 現在検知されているZoom参加者一覧（名前、ID、ミュート状態、所属ルーム） |
+| `currentRoom` | string | Bot自身が現在所在しているルーム名（通常「メインルーム」） |
+| `isMockMode` | boolean | 仮想シミュレータ稼働中フラグ |
+| `error` | string \| null | 直近の接続・切断エラーメッセージ |
+
+---
+
+### 12.4 ブレイクアウトルーム（BOルーム）自動振分け制御
+
+Zoom連携時、夜フェーズや役職ごとの密談はブレイクアウトルーム（Breakout Rooms）を動的に制御して行われます。
+
+- **`assignBreakoutRooms(assignments)`**:
+  - `assignments`: `{ [userId: string]: 'wolf' | 'ghost' | 'room_1' | 'main' }`
+  - **人狼の部屋 (`wolf`)**: 人狼陣営のプレイヤーを集約し、夜の襲撃相談を実施。
+  - **霊界 (`ghost`)**: 死亡したプレイヤーを隔離し、ゲーム本編のネタバレを防ぎつつ雑談・観戦。
+  - **個室 (`room_N`)**: 占い師・霊媒師・騎士などの夜単独アクション用待機室。
+  - **メインルーム (`main`)**: 昼フェーズ開始時に全員を一括でメインルームへ呼び戻し。
+
+---
+
+### 12.5 ミーティング内チャットコマンド仕様
+
+Botがミーティングに参加後、Zoom内のテキストチャットで以下のコマンドを受信・解析してゲームをコントロールします。
+
+| コマンド | 別名 | 説明 | 動作・レスポンス |
+| :--- | :--- | :--- | :--- |
+| `!開始` | `/開始`, `!start` | ゲームを開始 | レギュレーションに基づき役職配布・夜フェーズへ遷移 |
+| `!一時停止` | `/一時停止`, `!pause` | タイマー一時停止 | 昼の議論残り時間やアクション制限時間を一時停止 |
+| `!再開` | `/再開`, `!resume` | ゲーム再開 | 一時停止されたタイマーを再開 |
+| `!ヘルプ` | `/ヘルプ`, `!help` | コマンド案内 | チャット内に利用可能なコマンド一覧を送信 |
+
+- チャットログは直近50件がメモリ内に保持され、Webダッシュボードへリアルタイムに同期表示されます。
+
+---
+
+### 12.6 仮想シミュレータ（Mock Simulation）
+
+実環境のZoomアカウントやミーティングを開かずに、Webダッシュボード上で動作検証を行うためのシミュレータを内蔵しています。
+
+- **起動方法**: ダッシュボードの「🧪 仮想シミュレータ起動」ボタン、または `POST /api/zoom/mock/start` を実行。
+- **仕様**:
+  - 5〜13名のダミー参加者（「ホスト」「Alice (占い希望)」「Bob (市民)」等）が自動生成されます。
+  - チャット欄から仮想ユーザーとしてのメッセージ送信や `!開始` コマンドのテストが可能です。
+  - ブレイクアウトルームへの振り分けやミュート切り替えアニメーションがダッシュボード上でリアルタイムに再現されます。
