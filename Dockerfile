@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Build Environment
 # ==========================================
-FROM node:26.1.0-trixie-slim AS builder
+FROM node:26.12.1-trixie-slim AS builder
 
 WORKDIR /app
 # 🚨 追加：GitHubからのパッケージ取得に必要な git をインストール
@@ -23,7 +23,7 @@ RUN npm run build
 # ==========================================
 # Stage 2: Production Environment
 # ==========================================
-FROM node:26.1.0-trixie-slim
+FROM node:26.12.1-trixie-slim
 
 WORKDIR /app
 
