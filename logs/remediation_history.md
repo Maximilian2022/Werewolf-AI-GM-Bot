@@ -539,6 +539,25 @@ GitHub Code Scanning（CodeQL）において報告されていた 3 件の脆弱
    - `docker cp dist werewolf-gm-bot:/app/` および `docker compose restart werewolf-gm-bot` により本番コンテナへ反映。
    - メインBot、16体のバイトBot（Worker）、Assistant Bot、クリーンアップサービス、Cloudflare Tunnel がすべて正常に起動したことを確認。
 
+## 2026-10-25 CodeQL 追加アラート（Rate-limiting, CSRF, Clear-text Cookie）の完全是正
+
+### 概要
+初回リリースプッシュ後に CodeQL によって自動検出された Web サーバー（`src/server/app.ts`）に関する 3 件のアラート（`js/missing-rate-limiting` / CWE-770, `js/missing-token-validation` / CWE-352, `js/clear-text-cookie` / CWE-614）を根本的に是正しました。
+
+### 実施した変更
+1. **レートリミッターの導入 (`src/server/app.ts`, CWE-770 / CWE-400)**:
+   - `express-rate-limit` を導入し、15分間に最大1500リクエストのレートリミットを適用。
+   - 静的ファイルや SPA ルートフォールバック（`res.sendFile`）への過負荷攻撃（DoS）を防御。
+2. **セキュアクッキー強制 (`src/server/app.ts`, CWE-614 / CWE-319)**:
+   - `trust proxy: 1` を設定した上で、セッション Cookie の `secure: true`（HTTPS/Cloudflare Tunnel 経由必須）および `httpOnly: true`, `sameSite: 'lax'` を明示的に設定。
+3. **CSRF 保護ミドルウェアの導入 (`src/server/app.ts`, `public/app.js`, CWE-352)**:
+   - `lusca.csrf`（`angular: true` モード）を導入し、`XSRF-TOKEN` クッキーの発行および POST/PUT/DELETE 時の `x-xsrf-token` ヘッダー検証を実装。
+   - `public/app.js` の `window.fetch` を透過的にラップし、状態変更リクエスト時にクッキーから取得したトークンを `x-xsrf-token` ヘッダーへ自動付与する仕組みを完備。
+4. **本番コンテナへの安全な反映と稼働検証**:
+   - `npm run build` によるコンパイル成功を確認。
+   - コンテナ内でのパッケージ追加（`express-rate-limit`, `lusca`）および `docker cp` / 再起動により正常稼働を確認。
+
+
 
 
 

@@ -3,8 +3,32 @@
  * Werewolf GM Bot - WebUI Application Logic
  */
 
+// CSRF 保護（XSRF-TOKEN クッキーを読み取って x-xsrf-token ヘッダーに自動付与）
+(function setupCsrfFetch() {
+  function getCookie(name) {
+    const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+    return match ? decodeURIComponent(match[3]) : null;
+  }
+
+  const originalFetch = window.fetch;
+  window.fetch = function(input, init = {}) {
+    const method = (init.method || 'GET').toUpperCase();
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+      const token = getCookie('XSRF-TOKEN');
+      if (token) {
+        init.headers = {
+          ...init.headers,
+          'x-xsrf-token': token
+        };
+      }
+    }
+    return originalFetch.call(this, input, init);
+  };
+})();
+
 // アプリケーションの状態
 const state = {
+
   roles: [],
   regulations: [],
   currentRegulation: {

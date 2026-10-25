@@ -9,6 +9,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import session from 'express-session';
 import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import lusca from 'lusca';
 import * as path from 'node:path';
 import { StateManager } from '../state/StateManager.js';
 import { SettingsManager } from '../managers/SettingsManager.js';
@@ -57,16 +59,46 @@ export class WebServer {
   }
 
   private setupMiddlewares() {
+    // リバースプロキシ / Cloudflare Tunnel 配下でのプロキシヘッダー信頼
+    this.app.set('trust proxy', 1);
+
+    // 全体レートリミッター（DoS・ブルートフォース攻撃防止: CWE-770 / CWE-400 対策）
+    const limiter = rateLimit({
+      windowMs: 15 * 60 * 1000, // 15分間
+      max: 1500, // 最大1500リクエスト
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'too_many_requests', message: 'リクエスト数が上限を超えました。しばらく待ってから再試行してください。' }
+    });
+    this.app.use(limiter);
+
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
     this.app.use(cookieParser());
+
+    // セキュアCookie設定（CWE-614 / CWE-319 対策）
+    const isSecureCookie = process.env.COOKIE_INSECURE === 'true' ? false : true;
     this.app.use(session({
       secret: process.env.SESSION_SECRET || 'werewolf-gm-bot-super-secret-key-2026',
       resave: false,
       saveUninitialized: false,
       cookie: {
-        secure: false, // http または reverse proxy / tunnel 経由
+        secure: isSecureCookie, // HTTPS / Secure Cookie を強制
+        httpOnly: true,
+        sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000 // 7日間
+      }
+    }));
+
+    // CSRF 保護ミドルウェア（CWE-352 対策）
+    this.app.use(lusca.csrf({
+      angular: true, // XSRF-TOKEN クッキーを発行し、x-xsrf-token ヘッダーを検証
+      cookie: {
+        options: {
+          sameSite: 'lax',
+          secure: isSecureCookie,
+          httpOnly: false // フロントエンドJSがヘッダー付与用に読み取り可能
+        }
       }
     }));
 
@@ -74,6 +106,7 @@ export class WebServer {
     const publicPath = path.join(process.cwd(), 'public');
     this.app.use(express.static(publicPath));
   }
+
 
   private setupRoutes() {
     const tunnelMgr = TunnelManager.getInstance();
