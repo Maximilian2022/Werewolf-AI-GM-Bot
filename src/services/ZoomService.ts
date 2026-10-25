@@ -9,8 +9,10 @@ import { ZoomProfileManager } from '../managers/ZoomProfileManager.js';
 import { ZoomMeetingStatus, ZoomParticipant, ZoomSessionConfig } from '../types.js';
 import { Logger } from '../utils/logger.js';
 import { TTSService } from './TTSService.js';
+import { secureRandomId } from '../utils/cryptoRandom.js';
 
 export class ZoomService extends EventEmitter {
+
   private static instance: ZoomService;
   private currentConfig: ZoomSessionConfig | null = null;
   private status: ZoomMeetingStatus = {
@@ -144,7 +146,7 @@ export class ZoomService extends EventEmitter {
    */
   public sendChatMessage(message: string, targetUserId?: string): void {
     const logEntry = {
-      id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `chat_${Date.now()}_${secureRandomId(6)}`,
       sender: this.currentConfig?.botName || '人狼GM Bot',
       message,
       timestamp: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -163,7 +165,7 @@ export class ZoomService extends EventEmitter {
   public handleIncomingChatMessage(sender: string, message: string, senderUserId: string): void {
     const text = message.trim();
     const logEntry = {
-      id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `chat_${Date.now()}_${secureRandomId(6)}`,
       sender,
       message: text,
       timestamp: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),

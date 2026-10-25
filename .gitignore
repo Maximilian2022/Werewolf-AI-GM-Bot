@@ -1,19 +1,42 @@
+# ==========================================
+# 人狼 AI GM Bot - .gitignore
+# ==========================================
+
 # 依存関係
 node_modules/
 
 # ビルド出力
 dist/
 
-# 環境変数と機密情報
+# 環境変数・機密情報・シークレット
 .env
-*.json
-!package.json
-!tsconfig.json
+.env.*
+!.env.example
 gcp-key.json
+*credentials*.json
+*service-account*.json
+*.pem
+*.key
+*.crt
 
-# 自動生成されるデータ（録音、Stateなど）
+# 自動生成される実行時データ（セーブデータ、音声キャッシュ、レギュレーション等）
 data/
 
-# OSの一時ファイル
+# ログファイル
+*.log
+logs/*.log
+!logs/remediation_history.md
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 作業用一時フォルダ（外部記憶など）
+scratch/
+
+# OS・エディタ固有ファイル
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

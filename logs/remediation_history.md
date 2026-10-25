@@ -443,3 +443,102 @@ WebUI全体のデザインを「黒赤基調 × 漆黒と深紅（クリムゾ�
    - コンテナ内（`/app/dist`, `/app/public`）へ同期し、`docker compose restart werewolf-gm-bot` で再起動。
    - ボット本体、16体のバイトBot、WebUI（ポート3000）が正常稼働していることを確認。
 
+## 2026-10-25 新規役職のGM発話シーン完全実装 & timeline.md 全面改訂（全72件対応）
+
+### 概要
+今回追加された新規役職約20種について、GM（およびスタッフBot）が音声（TTS）で喋るべき全シーンを精査しました。不足していた個別待機VCへのプロンプト音声・決定復唱音声、処刑時の特殊演出音声（独裁者処刑・黒猫・ハンター・人狼の子ども・恋人・女王崩御）、および夜アクションのスタッフBot音声タスクを網羅的に実装し、進行時系列ドキュメント（`scratch/timeline.md`）の発話イベント一覧を全40件から全72件に拡充・更新しました。
+
+### 実施した変更
+1. **新規音声定数の追加 (`src/messages.ts`)**:
+   - `PROMPT_APPRENTICE_DIVINER_AWAKENED`: 覚醒した弟子の占い促し音声。
+   - `WOLF_TARGET_SET_DOUBLE`: 2回襲撃時の襲撃先復唱音声。
+   - `TRAPPER_TARGET_SET`, `COUNSELOR_TARGET_SET`, `SPY_TARGET_SET`, `HUNTER_TARGET_SET`: 夜行動決定復唱音声。
+   - `CUPID_TARGET_SET`, `FEMME_FATALE_TARGET_SET`, `LIVING_SPIRIT_TARGET_SET`: 初日夜の役職決定復唱音声。
+2. **ゲーム進行ハンドラーへの音声タスク組み込み (`src/handlers/PhaseHandler.ts`)**:
+   - **初日夜（0日目夜）**: キューピット、悪女、生霊の各個室VCへスタッフBotを派遣し、プロンプト音声および決定時の復唱音声を再生。
+   - **処刑フェーズ**: 独裁者COによる即時処刑執行時に専用音声（`DICTATOR_EXEC`）をメインVCで再生。黒猫の呪い（`BLACK_CAT_REVENGE`）、ハンター銃殺（`HUNTER_SHOOT`）、親狼激怒（`WOLF_CUB_ENRAGED`）、恋人後追い死（`LOVERS_FOLLOW`）、女王崩御・生霊即位（`QUEEN_DIED` / `QUEEN_INHERITED`）の放送処理を完備。
+   - **夜フェーズ**: 空きWorkerの要求数を12体に拡張。人狼の2回襲撃プロンプト（`PROMPT_WOLF_DOUBLE`）および決定復唱（`WOLF_TARGET_SET_DOUBLE`）、罠師・カウンセラー・スパイ・ハンター・覚醒弟子のプロンプト音声および決定復唱音声を各個室VCで確実に再生。
+3. **進行タイムラインドキュメントの改訂 (`scratch/timeline.md`)**:
+   - 第②初日夜、第⑥処刑、第⑦夜フェーズのGM発話セリフ詳細を追記。
+   - GM発話一覧サマリー表を全40項目から**全72項目**へ大幅に拡張・完全同期。
+4. **本番環境への反映と稼働検証**:
+   - `npm run build` によるコンパイル成功を確認。
+   - `docker cp dist werewolf-gm-bot:/app/` および `docker compose restart werewolf-gm-bot` により本番コンテナへ反映。
+   - メインBot、16体のバイトBot（WorkerBot）、Cloudflare Tunnel（ポート3000）の正常稼働を確認。
+
+## 2026-10-25 ドキュメント体系化（manual/新設）、公開リポジトリ向け.gitignore整理、README.md最新化、詳細仕様書（manual.md）作成
+
+### 概要
+リポジトリの公開および長期的な運用・開発の円滑化を目的とし、ドキュメント構造の体系化とセキュリティ・品質向上のための再整理を実施しました。
+
+### 実施した変更
+1. **マニュアルディレクトリの新設と移動 (`manual/`)**:
+   - `manual/` ディレクトリを作成。
+   - `scratch/timeline.md` ➔ `manual/timeline.md` に移動（全72件のGM発話セリフ・進行シーケンス）。
+   - `scratch/role.md` ➔ `manual/role.md` に移動（全30種以上の役職能力・バッティング解決規則・勝利優先度）。
+   - `scratch/` から旧ドキュメントを安全に削除。
+2. **`.gitignore` の再構築と公開リポジトリ向けセキュリティ強化 (`.gitignore`)**:
+   - `scratch/` フォルダをGit無視対象に追加。
+   - 誤ってGitインデックスに登録されていた `logs/bot.log` および `scratch/` 配下を `git rm --cached` で追跡解除。
+   - 秘密鍵、トークン、クレデンシャル、ログ、OS一時ファイルを網羅する業界標準の厳格な除外設定へ刷新（`logs/remediation_history.md` は追跡を継続）。
+3. **初心者向け入門ガイド `README.md` の作成 (`README.md`)**:
+   - 過大・誇張のない上品で誠実なトーンで執筆。
+   - AIの支援を受けて作成・洗練されたプロジェクトであることを明記。
+   - 初めて利用する人でもわかる、概要・3ステップ参加ガイド・コマンド一覧・Webダッシュボード・役職一覧を整理。
+4. **ガチ詳細仕様書 `manual/manual.md` の作成 (`manual/manual.md`)**:
+   - 不具合や攻撃に繋がる脆弱性情報を除き、開発者・運用者向けの内部技術仕様をすべて網羅。
+   - システムアーキテクチャ（GM/Assistant/Worker 18体Botクラスタ構成・Mermaid図）。
+   - ゲーム進行ステートマシン（独裁者CO割り込み、決選投票ループ、終了判定）。
+   - 状態管理とリカバリ（アトミック保存・クラッシュ復旧メカニズム）。
+   - 3大ルール解決エンジン（`NightActionResolver` 解決シーケンス図・全バッティング規則、`ExecutionResolver`、`WinConditionChecker` 優先度階層表）。
+   - TTS音声配信ストリーミングパイプラインおよび排他制御。
+   - AI総評（Gemini インテリジェント・フォールバック機構）。
+   - Web管理ダッシュボード（ポート3000、Express 5、OAuth2、参加者情報秘匿ロック、Cloudflare Tunnel連携）およびAPIエンドポイント仕様。
+   - スラッシュコマンド（全8種）の実行権限・引数仕様。
+
+### 影響範囲と検証
+- `git status` により、`scratch/` や `logs/bot.log` が追跡対象外となり、`manual/` および `README.md` が適切に構成されていることを確認。
+- 本番コンテナは停止・再起動することなく、既存の安定稼働状態を維持。
+
+## 2026-10-25 GitHub Code Scanning (CWE-338) 完全是正、.env.example 新設、README Zoom対応追記
+
+### 概要
+GitHub Code Scanning（CodeQL）において報告されていた 3 件の脆弱性警告（`js/insecure-randomness`, CWE-338）について根本原因を究明し、プロジェクト全体の疑似乱数生成処理を暗号学的に安全な擬似乱数生成器（CSPRNG）へ刷新しました。また、公開リポジトリ向けの `.env.example` の作成、および `README.md` への Zoom ミーティング連携ガイド・コマンド仕様の追記を実施しました。
+
+### 実施した変更
+1. **暗号学的に安全な乱数ユーティリティの新設 (`src/utils/cryptoRandom.ts`)**:
+   - Node.js 標準の `node:crypto` モジュールを活用し、以下の関数群を実装：
+     - `secureRandom()`: `crypto.randomBytes(4)` を用いた `[0, 1)` の浮動小数点数（`Math.random()` の安全な代替）。
+     - `secureRandomInt(min, max)`: `crypto.randomInt` によるセキュアな整数乱数。
+     - `secureSample(array)`: 配列からの安全なランダム要素サンプリング。
+     - `secureShuffle(array)`: Fisher-Yates アルゴリズムによる安全なインプレース配列シャッフル。
+     - `secureRandomId(length)`: ゲームIDやチャットID用の暗号学的に安全なランダムID文字列。
+2. **全コードベースからの `Math.random()` の完全除去 (Code Scanning アラート解消)**:
+   - `src/handlers/PhaseHandler.ts`:
+     - 役職配布時の Fisher-Yates シャッフルを `secureShuffle` に置換。
+     - 投票フェーズ・決選弁明者指名・タイムアウト投票・最終処刑者決定抽選を `secureSample` に置換（Alert #1, #3 解消）。
+     - 夜フェーズの占い師・騎士・未熟な占い師・無謀な占い師・人狼のタイムアウト時ターゲット抽選を `secureSample` に置換（Alert #2 解消）。
+     - バイトBotの相槌確率判定を `secureRandom()` に置換。
+   - `src/engine/NightActionResolver.ts`:
+     - 罠師迎撃、猫又道連れ、ハンター道連れ時の人狼・生存者抽選を `secureSample` に置換。
+   - `src/engine/ExecutionResolver.ts`:
+     - 黒猫呪い、猫又道連れ、ハンター道連れ時の対象抽選を `secureSample` に置換。
+   - `src/handlers/CommandHandler.ts`:
+     - `/開始` コマンドにおける `gameId` 生成を `secureRandomId(6)` に置換。
+   - `src/services/ZoomService.ts`:
+     - チャットメッセージID生成を `secureRandomId(6)` に置換。
+   - プロジェクト全体から `Math.random()` の使用を完全にゼロ化。
+3. **`.env.example` の新設 (`.env.example`)**:
+   - Discord Bot トークン（GM/Assistant/Worker）、Discord Client ID、サーバーID、Gemini APIキー、Google Cloud TTS 認証パス、Express セッションシークレット、管理者ユーザーID、OAuth2 クライアント情報等の全環境変数を親切な解説・日本語コメント付きで体系化。
+4. **`README.md` への Zoom ミーティング連携の追記 (`README.md`)**:
+   - Discord だけでなく Zoom 上でも Bot を召喚して人狼ゲームを全自動進行できる旨を明記。
+   - Zoom かんたんスタートガイド（Webダッシュボードからの参加召喚、ブレイクアウトルーム自動制御）。
+   - Zoom ミーティング内チャットコマンド（`!開始`, `!一時停止`, `!再開`, `!ヘルプ`）の一覧表を追加。
+5. **本番コンテナへの安全な反映と稼働検証**:
+   - `npm run build` によるビルド成功（型エラー0件）。
+   - `docker cp dist werewolf-gm-bot:/app/` および `docker compose restart werewolf-gm-bot` により本番コンテナへ反映。
+   - メインBot、16体のバイトBot（Worker）、Assistant Bot、クリーンアップサービス、Cloudflare Tunnel がすべて正常に起動したことを確認。
+
+
+
+

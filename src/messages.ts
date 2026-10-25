@@ -176,7 +176,10 @@ export const MSG = {
     PROMPT_FEMME_FATALE: `悪女の方、本命1名と手玉を選択してください。`,
     PROMPT_LIVING_SPIRIT: `生霊の方、憑依する対象を1名選択してください。`,
 
+    PROMPT_APPRENTICE_DIVINER_AWAKENED: `師匠の占い師が死亡したため、占いの力が覚醒しました。今夜占う対象を選択してください。`,
+
     WOLF_TARGET_SET: (name: string) => `襲撃先は、${name}さんですね。`,
+    WOLF_TARGET_SET_DOUBLE: (name1: string, name2: string) => `襲撃先は、${name1}さんと、${name2}さんですね。`,
     SEER_RESULT: (isWolf: boolean) => `結果は、${isWolf ? '人狼でした' : '人狼ではありませんでした'}。`,
     APPRENTICE_SEER_RESULT: (isWolf: boolean, isCorrect: boolean) => `結果は、${isWolf ? '人狼でした' : '人狼ではありませんでした'}。予想は、${isCorrect ? '的中しました' : '外れてしまいました'}。`,
     KNIGHT_TARGET_SET: (name: string) => `${name}さんを護衛します。`,
@@ -185,6 +188,10 @@ export const MSG = {
     TRAPPER_TARGET_SET: (name: string) => `${name}さんに罠を仕掛けました。`,
     COUNSELOR_TARGET_SET: (name: string) => `${name}さんにカウンセリングを行います。`,
     SPY_TARGET_SET: (name: string) => `${name}さんの能力を妨害します。`,
+    HUNTER_TARGET_SET: (name: string) => `万一の道連れ先として、${name}さんを指定しました。`,
+    CUPID_TARGET_SET: (name1: string, name2: string) => `${name1}さんと${name2}さんを恋人として結びつけました。`,
+    FEMME_FATALE_TARGET_SET: (name: string) => `${name}さんを本命として選びました。`,
+    LIVING_SPIRIT_TARGET_SET: (name: string) => `${name}さんに憑依しました。`,
     MEDIUM_RESULT: (name: string, isWolf: boolean) => `霊媒結果をお伝えします。処刑された${name}さんは、${isWolf ? '人狼でした' : '人狼ではありませんでした'}。`,
     
     // 独裁者・特殊能力発動セリフ

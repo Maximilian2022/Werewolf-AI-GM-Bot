@@ -6,6 +6,8 @@ import { Player } from '../types.js';
 import { RoleRegistry } from '../roles/RoleRegistry.js';
 import { ExecutionInput, ExecutionResolutionOutput } from './types.js';
 import { NightContext } from './NightActionResolver.js';
+import { secureSample } from '../utils/cryptoRandom.js';
+
 
 export class ExecutionResolver {
   public static resolve(
@@ -90,7 +92,7 @@ export class ExecutionResolver {
         return !r || !['werewolf', 'wolf_cub', 'berserk_wolf', 'lone_wolf'].includes(r.id);
       });
       if (nonWolves.length > 0) {
-        const victim = nonWolves[Math.floor(Math.random() * nonWolves.length)];
+        const victim = secureSample(nonWolves);
         additionalKilledSet.add(victim.userId);
         blackCatRevengeKilledUserId = victim.userId;
         logs.push(`[黒猫処刑道連れ] 黒猫の処刑により生存者から1名が道連れになりました (Target: ${victim.userId})`);
@@ -101,7 +103,7 @@ export class ExecutionResolver {
     if (executedRole?.id === 'nekomata') {
       const remainingAlive = players.filter(p => p.isAlive && p.userId !== executedUserId && !additionalKilledSet.has(p.userId));
       if (remainingAlive.length > 0) {
-        const victim = remainingAlive[Math.floor(Math.random() * remainingAlive.length)];
+        const victim = secureSample(remainingAlive);
         additionalKilledSet.add(victim.userId);
         logs.push(`[猫又処刑道連れ] 猫又の処刑により生存者から1名が道連れになりました (Target: ${victim.userId})`);
       }
@@ -113,7 +115,7 @@ export class ExecutionResolver {
       if (!victimId || !players.some(p => p.isAlive && p.userId === victimId && p.userId !== executedUserId)) {
         const remaining = players.filter(p => p.isAlive && p.userId !== executedUserId && !additionalKilledSet.has(p.userId));
         if (remaining.length > 0) {
-          victimId = remaining[Math.floor(Math.random() * remaining.length)].userId;
+          victimId = secureSample(remaining).userId;
         }
       }
       if (victimId) {

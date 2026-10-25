@@ -28,6 +28,7 @@ import { Player, GameState } from '../types.js';
 import { Logger } from '../utils/logger.js';
 import { MSG } from '../messages.js';
 import { SettingsManager, GameSettings } from '../managers/SettingsManager.js';
+import { secureShuffle, secureRandom, secureSample } from '../utils/cryptoRandom.js';
 
 export class PhaseHandler {
   private static getSysTimeMs(settings: GameSettings) {
@@ -38,13 +39,9 @@ export class PhaseHandler {
   }
 
   private static shuffleArray<T>(array: T[]): T[] {
-    const arr = [...array];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
+    return secureShuffle([...array]);
   }
+
 
   private static checkWinCondition(state: GameState, specialWin?: { undertakerWin?: boolean; foolWin?: boolean }): WinningTeam {
     return WinConditionChecker.check(state.players, specialWin, {
@@ -393,10 +390,13 @@ export class PhaseHandler {
     const wolfVc = await assistantGuild.channels.fetch(state.wolfVcId).catch(()=>null) as VoiceBasedChannel;
     
     const playerIds = state.players.map((p: Player) => p.userId);
-    const freeWorkers = await WorkerManager.getInstance().getFreeWorkers(state.serverId, playerIds, 2);
+    const freeWorkers = await WorkerManager.getInstance().getFreeWorkers(state.serverId, playerIds, 6);
     
     const wolfWorkerClient = freeWorkers.length > 0 ? freeWorkers.shift()! : assistantClient; 
     const seerWorkerClient = freeWorkers.length > 0 ? freeWorkers.shift()! : assistantClient;
+    const cupidWorkerClient = freeWorkers.length > 0 ? freeWorkers.shift()! : null;
+    const femmeWorkerClient = freeWorkers.length > 0 ? freeWorkers.shift()! : null;
+    const spiritWorkerClient = freeWorkers.length > 0 ? freeWorkers.shift()! : null;
 
     let nightWorkerConn: any = null;
 
@@ -458,6 +458,16 @@ export class PhaseHandler {
     if (cupidPlayer) {
       firstNightActionPromises.push((async () => {
         try {
+          const cupidVc = await guild.channels.fetch(cupidPlayer.waitVcId).catch(() => null) as VoiceBasedChannel;
+          let cupidConn: any = null;
+          if (cupidVc && cupidWorkerClient) {
+            cupidConn = await VoiceService.connectWithClient(cupidWorkerClient, cupidVc, gameId, 'first_cupid');
+            if (cupidConn) cupidConn._isBusy = true;
+            await new Promise(r => setTimeout(r, 1000));
+            const promptAudio = await TTSService.generateAudio(MSG.VOICE.PROMPT_CUPID, gameId, 'cupid_prompt');
+            await VoiceService.playAudio(cupidConn, promptAudio, gameId);
+          }
+
           const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('cupid_select')
             .setPlaceholder('恋人にする2名を選択')
@@ -482,6 +492,13 @@ export class PhaseHandler {
               const m2 = await guild.members.fetch(p2Id).catch(() => null);
               await this.sendToPersonalChannel(guild, p1Id, MSG.CHAT.DM_LOVERS_INFO(m2?.displayName || '不明'));
               await this.sendToPersonalChannel(guild, p2Id, MSG.CHAT.DM_LOVERS_INFO(m1?.displayName || '不明'));
+
+              if (cupidConn) {
+                const setAudio = await TTSService.generateAudio(MSG.VOICE.CUPID_TARGET_SET(m1?.displayName || '不明', m2?.displayName || '不明'), gameId, 'cupid_set');
+                await VoiceService.playAudio(cupidConn, setAudio, gameId);
+                cupidConn._isBusy = false;
+                try { VoiceService.disconnectClient(cupidWorkerClient, gameId); } catch(e) {}
+              }
             }
           }
         } catch (e) {}
@@ -491,6 +508,16 @@ export class PhaseHandler {
     if (femmeFatalePlayer) {
       firstNightActionPromises.push((async () => {
         try {
+          const ffVc = await guild.channels.fetch(femmeFatalePlayer.waitVcId).catch(() => null) as VoiceBasedChannel;
+          let ffConn: any = null;
+          if (ffVc && femmeWorkerClient) {
+            ffConn = await VoiceService.connectWithClient(femmeWorkerClient, ffVc, gameId, 'first_femme');
+            if (ffConn) ffConn._isBusy = true;
+            await new Promise(r => setTimeout(r, 1000));
+            const promptAudio = await TTSService.generateAudio(MSG.VOICE.PROMPT_FEMME_FATALE, gameId, 'femme_prompt');
+            await VoiceService.playAudio(ffConn, promptAudio, gameId);
+          }
+
           const others = updatedPlayers.filter(p => p.userId !== femmeFatalePlayer.userId);
           const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('femme_fatale_select')
@@ -516,9 +543,17 @@ export class PhaseHandler {
               await i.deferUpdate().catch(() => {});
               await msg.delete().catch(() => {});
               const ffMember = await guild.members.fetch(femmeFatalePlayer.userId).catch(() => null);
+              const honeyMember = await guild.members.fetch(honeyId).catch(() => null);
               await this.sendToPersonalChannel(guild, honeyId, MSG.CHAT.DM_LOVERS_INFO(ffMember?.displayName || '悪女'));
               for (const pawnId of pawnIds) {
                 await this.sendToPersonalChannel(guild, pawnId, MSG.CHAT.DM_LOVERS_INFO(ffMember?.displayName || '悪女'));
+              }
+
+              if (ffConn) {
+                const setAudio = await TTSService.generateAudio(MSG.VOICE.FEMME_FATALE_TARGET_SET(honeyMember?.displayName || '本命'), gameId, 'femme_set');
+                await VoiceService.playAudio(ffConn, setAudio, gameId);
+                ffConn._isBusy = false;
+                try { VoiceService.disconnectClient(femmeWorkerClient, gameId); } catch(e) {}
               }
             }
           }
@@ -529,6 +564,16 @@ export class PhaseHandler {
     if (livingSpiritPlayer) {
       firstNightActionPromises.push((async () => {
         try {
+          const spiritVc = await guild.channels.fetch(livingSpiritPlayer.waitVcId).catch(() => null) as VoiceBasedChannel;
+          let spiritConn: any = null;
+          if (spiritVc && spiritWorkerClient) {
+            spiritConn = await VoiceService.connectWithClient(spiritWorkerClient, spiritVc, gameId, 'first_spirit');
+            if (spiritConn) spiritConn._isBusy = true;
+            await new Promise(r => setTimeout(r, 1000));
+            const promptAudio = await TTSService.generateAudio(MSG.VOICE.PROMPT_LIVING_SPIRIT, gameId, 'spirit_prompt');
+            await VoiceService.playAudio(spiritConn, promptAudio, gameId);
+          }
+
           const others = updatedPlayers.filter(p => p.userId !== livingSpiritPlayer.userId && p.role !== '生霊');
           const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('living_spirit_select')
@@ -555,6 +600,13 @@ export class PhaseHandler {
               await msg.delete().catch(() => {});
               const tMember = await guild.members.fetch(targetId).catch(() => null);
               await this.sendToPersonalChannel(guild, livingSpiritPlayer.userId, `✅ **${tMember?.displayName || '対象'}** に憑依しました。対象が死亡した瞬間に能力を引き継ぎます。`);
+
+              if (spiritConn) {
+                const setAudio = await TTSService.generateAudio(MSG.VOICE.LIVING_SPIRIT_TARGET_SET(tMember?.displayName || '対象'), gameId, 'spirit_set');
+                await VoiceService.playAudio(spiritConn, setAudio, gameId);
+                spiritConn._isBusy = false;
+                try { VoiceService.disconnectClient(spiritWorkerClient, gameId); } catch(e) {}
+              }
             }
           }
         } catch (e) {}
@@ -762,7 +814,7 @@ export class PhaseHandler {
                   await selectInt.deferUpdate().catch(() => {});
                   await selectMsg.delete().catch(() => {});
                 } else {
-                  dictatorTargetId = others[Math.floor(Math.random() * others.length)].userId;
+                  dictatorTargetId = secureSample(others).userId;
                 }
               }
             });
@@ -792,10 +844,10 @@ export class PhaseHandler {
 
           const aliveWorkerPlayers = alivePlayers.filter(p => workers.some(w => w.user?.id === p.userId));
           for (const workerPlayer of aliveWorkerPlayers) {
-            if (Math.random() < 0.70) {
+            if (secureRandom() < 0.70) {
               const workerClient = workers.find(w => w.user?.id === workerPlayer.userId);
               if (workerClient) {
-                const phrase = MSG.VOICE.WORKER_PHRASES[Math.floor(Math.random() * MSG.VOICE.WORKER_PHRASES.length)];
+                const phrase = secureSample(MSG.VOICE.WORKER_PHRASES);
                 
                 (async () => {
                   try {
@@ -1010,7 +1062,7 @@ export class PhaseHandler {
           if (waitQueue.length > 0) {
               speaker = waitQueue.shift();
           } else {
-              speaker = unvotedPlayers[Math.floor(Math.random() * unvotedPlayers.length)];
+              speaker = secureSample(unvotedPlayers);
               randomlyAssignedSpeakerIds.push(speaker.userId);
           }
         }
@@ -1111,7 +1163,7 @@ export class PhaseHandler {
 
       if (!currentVote) {
           const candidates = alivePlayers.filter((p: Player) => p.userId !== currentSpeaker!.userId);
-          const randomTargetId = candidates[Math.floor(Math.random() * candidates.length)].userId;
+          const randomTargetId = secureSample(candidates).userId;
           randomVoterIds.push(currentSpeaker!.userId);
           const targetName = (guild.members.cache.get(randomTargetId) || await guild.members.fetch(randomTargetId)).displayName;
           await this.sendToPersonalChannel(guild, currentSpeaker!.userId, MSG.CHAT.DM_TIMEOUT_VOTE(targetName));
@@ -1277,7 +1329,7 @@ export class PhaseHandler {
                 if (defenseWaitQueue.length > 0) {
                     targetId = defenseWaitQueue.shift();
                 } else {
-                    targetId = undefensedTargets[Math.floor(Math.random() * undefensedTargets.length)];
+                    targetId = secureSample(undefensedTargets);
                 }
             }
         }
@@ -1375,7 +1427,7 @@ export class PhaseHandler {
         await this.waitWithPauseAndCondition(voteTimeoutMs, () => resolved);
         if (!resolved) {
             if (pMsg) await pMsg.delete().catch(()=>{});
-            const randomTarget = tiedUserIds[Math.floor(Math.random() * tiedUserIds.length)];
+            const randomTarget = secureSample(tiedUserIds);
             runoffVotes[voter.userId] = randomTarget;
             randomRunoffVoterIds.push(voter.userId);
             const selectedName = (await guild.members.fetch(randomTarget)).displayName;
@@ -1410,7 +1462,7 @@ export class PhaseHandler {
     let finalExecutionTargets = Object.keys(runoffCounts).filter(id => runoffCounts[id] === maxRunoffVotes);
 
     if (finalExecutionTargets.length === 0 || maxRunoffVotes === 0) finalExecutionTargets = tiedUserIds;
-    const executedUserId = finalExecutionTargets[Math.floor(Math.random() * finalExecutionTargets.length)];
+    const executedUserId = secureSample(finalExecutionTargets);
 
     stateManager.updateState({ executedUserId, runoffTargets: undefined });
     stateManager.nextPhase('execution');
@@ -1476,7 +1528,11 @@ export class PhaseHandler {
         await new Promise(r => setTimeout(r, 1000));
         const assistantConnection = await VoiceService.connectWithClient(assistantClient, ghostVc, gameId, 'ghost');
         
-        const executionAudio = await TTSService.generateAudio(MSG.VOICE.EXEC_START(executedName), gameId, `exec_${executedUserId}`);
+        const isDictatorExec = !!(state.dictatorUsed && state.executedUserId === executedUserId);
+        const execVoiceText = isDictatorExec 
+          ? MSG.VOICE.DICTATOR_EXEC(executedName)
+          : MSG.VOICE.EXEC_START(executedName);
+        const executionAudio = await TTSService.generateAudio(execVoiceText, gameId, `exec_${executedUserId}`);
         await VoiceService.broadcastAudio([gmConnection, assistantConnection], executionAudio, gameId);
       }
 
@@ -1848,7 +1904,7 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     }
    
     const playerIds = state.players.map((p: Player) => p.userId);
-    const freeWorkers = await wm.getFreeWorkers(state.serverId, playerIds, 4);
+    const freeWorkers = await wm.getFreeWorkers(state.serverId, playerIds, 12);
     
     // 🚨 ユーザー側での実装修正：アシスタントは絶対に個室へ派遣せず完全に隔離
     const getWorker = (index: number) => freeWorkers.length > 0 ? freeWorkers[index % freeWorkers.length] : null;
@@ -1890,7 +1946,9 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
 
     const wolfVc = await assistantGuild.channels.fetch(state.wolfVcId) as VoiceBasedChannel;
     if (wolfVc) {
-      playVoiceTask(getWorker(1), wolfVc, MSG.VOICE.PROMPT_WOLF, 'wolf_prompt');
+      const isWolfDoubleAttack = !!(stateManager.getState().wolfCubRevenge);
+      const wolfPrompt = isWolfDoubleAttack ? MSG.VOICE.PROMPT_WOLF_DOUBLE : MSG.VOICE.PROMPT_WOLF;
+      playVoiceTask(getWorker(1), wolfVc, wolfPrompt, 'wolf_prompt');
     }
 
     const seer = alivePlayers.find((p: Player) => p.role === '占い師');
@@ -1939,6 +1997,46 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
       const undertakerVc = await guild.channels.fetch(undertaker.waitVcId).catch(() => null) as VoiceBasedChannel;
       if (undertakerVc) {
         playVoiceTask(getWorker(7), undertakerVc, MSG.VOICE.PROMPT_UNDERTAKER, 'undertaker_prompt');
+      }
+    }
+
+    const trapper = alivePlayers.find((p: Player) => p.role === '罠師');
+    if (trapper) {
+      const trapperVc = await guild.channels.fetch(trapper.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (trapperVc) {
+        playVoiceTask(getWorker(8), trapperVc, MSG.VOICE.PROMPT_TRAPPER, 'trapper_prompt');
+      }
+    }
+
+    const counselor = alivePlayers.find((p: Player) => p.role === 'カウンセラー');
+    if (counselor) {
+      const counselorVc = await guild.channels.fetch(counselor.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (counselorVc) {
+        playVoiceTask(getWorker(9), counselorVc, MSG.VOICE.PROMPT_COUNSELOR, 'counselor_prompt');
+      }
+    }
+
+    const spy = alivePlayers.find((p: Player) => p.role === 'スパイ');
+    if (spy) {
+      const spyVc = await guild.channels.fetch(spy.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (spyVc) {
+        playVoiceTask(getWorker(10), spyVc, MSG.VOICE.PROMPT_SPY, 'spy_prompt');
+      }
+    }
+
+    const hunter = alivePlayers.find((p: Player) => p.role === 'ハンター');
+    if (hunter) {
+      const hunterVc = await guild.channels.fetch(hunter.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (hunterVc) {
+        playVoiceTask(getWorker(11), hunterVc, MSG.VOICE.PROMPT_HUNTER, 'hunter_prompt');
+      }
+    }
+
+    const apprenticeDiviner = alivePlayers.find((p: Player) => p.role === '占い師の弟子');
+    if (apprenticeDiviner && stateManager.getState().apprenticeDivinerAwakened) {
+      const adVc = await guild.channels.fetch(apprenticeDiviner.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (adVc) {
+        playVoiceTask(getWorker(12), adVc, MSG.VOICE.PROMPT_APPRENTICE_DIVINER_AWAKENED, 'ad_prompt');
       }
     }
 
@@ -2014,7 +2112,12 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
           await wolfTextCh.send(MSG.CHAT.WOLF_TARGET_SET(i.user.id, displayNames)).catch(() => {});
           
           // 人狼VCへの音声再生
-          if (wolfVc) playVoiceTask(getWorker(1), wolfVc, MSG.VOICE.WOLF_TARGET_SET(targetName), 'wolf_res');
+          if (wolfVc) {
+            const voiceText = secondTargetName 
+              ? MSG.VOICE.WOLF_TARGET_SET_DOUBLE(targetName, secondTargetName)
+              : MSG.VOICE.WOLF_TARGET_SET(targetName);
+            playVoiceTask(getWorker(1), wolfVc, voiceText, 'wolf_res');
+          }
         });
 
         await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => false);
@@ -2060,7 +2163,7 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
         
         if (!resolved) {
           if (pMsg) await pMsg.delete().catch(()=>{});
-          targetId = targets[Math.floor(Math.random() * targets.length)].userId;
+          targetId = secureSample(targets).userId;
           const targetPlayer = stateManager.getState().players.find((p: Player) => p.userId === targetId)!;
           stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, seerTargetId: targetId } });
           const targetName = (await guild.members.fetch(targetId)).displayName;
@@ -2112,7 +2215,7 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
         
         if (!resolved) {
           if (pMsg) await pMsg.delete().catch(()=>{});
-          targetId = targets[Math.floor(Math.random() * targets.length)].userId;
+          targetId = secureSample(targets).userId;
           stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, knightTargetId: targetId }, lastGuardedUserId: targetId });
           targetName = (await guild.members.fetch(targetId)).displayName;
           await this.sendToPersonalChannel(guild, knight.userId, MSG.CHAT.DM_TIMEOUT_KNIGHT(targetName));
@@ -2186,7 +2289,7 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
         await pMsg.delete().catch(() => {});
 
         if (!resolved && !selectedTargetId) {
-          selectedTargetId = targets[Math.floor(Math.random() * targets.length)]?.userId || '';
+          selectedTargetId = secureSample(targets)?.userId || '';
           stateManager.updateState({
             nightActions: {
               ...stateManager.getState().nightActions,
@@ -2245,7 +2348,7 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
 
         let targetIdForAudio = stateManager.getState().nightActions.recklessTargetId;
         if (!resolved && !targetIdForAudio) {
-          targetIdForAudio = targets[Math.floor(Math.random() * targets.length)]?.userId || '';
+          targetIdForAudio = secureSample(targets)?.userId || '';
           stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, recklessTargetId: targetIdForAudio } });
         }
 
@@ -2360,7 +2463,6 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     })();
 
     // 🪤 罠師のアクション
-    const trapper = alivePlayers.find((p: Player) => p.role === '罠師');
     const trapperPromise = (async () => {
       if (!trapper) return;
       try {
@@ -2386,6 +2488,10 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
           collector.stop();
           const targetName = (await guild.members.fetch(targetId)).displayName;
           await this.sendToPersonalChannel(guild, trapper.userId, `✅ **${targetName}** さんに罠を仕掛けました。`);
+          const trapperVc = await guild.channels.fetch(trapper.waitVcId).catch(() => null) as VoiceBasedChannel;
+          if (trapperVc) {
+            playVoiceTask(getWorker(8), trapperVc, MSG.VOICE.TRAPPER_TARGET_SET(targetName), 'trapper_res');
+          }
         });
         await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
         collector.stop();
@@ -2394,7 +2500,6 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     })();
 
     // 🩺 カウンセラーのアクション
-    const counselor = alivePlayers.find((p: Player) => p.role === 'カウンセラー');
     const counselorPromise = (async () => {
       if (!counselor) return;
       try {
@@ -2420,6 +2525,10 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
           collector.stop();
           const targetName = (await guild.members.fetch(targetId)).displayName;
           await this.sendToPersonalChannel(guild, counselor.userId, `✅ **${targetName}** さんにカウンセリングを行います。`);
+          const counselorVc = await guild.channels.fetch(counselor.waitVcId).catch(() => null) as VoiceBasedChannel;
+          if (counselorVc) {
+            playVoiceTask(getWorker(9), counselorVc, MSG.VOICE.COUNSELOR_TARGET_SET(targetName), 'counselor_res');
+          }
         });
         await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
         collector.stop();
@@ -2428,7 +2537,6 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     })();
 
     // 🕵️ スパイのアクション
-    const spy = alivePlayers.find((p: Player) => p.role === 'スパイ');
     const spyPromise = (async () => {
       if (!spy) return;
       try {
@@ -2454,6 +2562,10 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
           collector.stop();
           const targetName = (await guild.members.fetch(targetId)).displayName;
           await this.sendToPersonalChannel(guild, spy.userId, `✅ **${targetName}** さんの能力妨害を指定しました。`);
+          const spyVc = await guild.channels.fetch(spy.waitVcId).catch(() => null) as VoiceBasedChannel;
+          if (spyVc) {
+            playVoiceTask(getWorker(10), spyVc, MSG.VOICE.SPY_TARGET_SET(targetName), 'spy_res');
+          }
         });
         await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
         collector.stop();
@@ -2462,7 +2574,6 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     })();
 
     // 🏹 ハンターのアクション（夜の事前道連れ指定）
-    const hunter = alivePlayers.find((p: Player) => p.role === 'ハンター');
     const hunterPromise = (async () => {
       if (!hunter) return;
       try {
@@ -2488,6 +2599,10 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
           collector.stop();
           const targetName = (await guild.members.fetch(targetId)).displayName;
           await this.sendToPersonalChannel(guild, hunter.userId, `✅ 万一の道連れ先として **${targetName}** さんを指定しました。`);
+          const hunterVc = await guild.channels.fetch(hunter.waitVcId).catch(() => null) as VoiceBasedChannel;
+          if (hunterVc) {
+            playVoiceTask(getWorker(11), hunterVc, MSG.VOICE.HUNTER_TARGET_SET(targetName), 'hunter_res');
+          }
         });
         await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
         collector.stop();
@@ -2496,7 +2611,6 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     })();
 
     // 🔮 覚醒した占い師の弟子の占いアクション
-    const apprenticeDiviner = alivePlayers.find((p: Player) => p.role === '占い師の弟子');
     const apprenticeDivinerPromise = (async () => {
       if (!apprenticeDiviner || !stateManager.getState().apprenticeDivinerAwakened) return;
       try {
@@ -2520,6 +2634,14 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
           resolved = true;
           await i.deferUpdate().catch(() => {});
           collector.stop();
+          const targetPlayer = stateManager.getState().players.find(p => p.userId === targetId);
+          const isWolf = targetPlayer?.role === '人狼';
+          const targetName = (await guild.members.fetch(targetId)).displayName;
+          await this.sendToPersonalChannel(guild, apprenticeDiviner.userId, MSG.CHAT.DM_SEER_RESULT(targetName, isWolf));
+          const adVc = await guild.channels.fetch(apprenticeDiviner.waitVcId).catch(() => null) as VoiceBasedChannel;
+          if (adVc) {
+            playVoiceTask(getWorker(12), adVc, MSG.VOICE.SEER_RESULT(isWolf), 'ad_res');
+          }
         });
         await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
         collector.stop();
@@ -2564,7 +2686,7 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     }
 
     if (aliveWolves.length > 0 && !stateManager.getState().nightActions.wolfTargetId) {
-        const randomTarget = wolfTargets[Math.floor(Math.random() * wolfTargets.length)].userId;
+        const randomTarget = secureSample(wolfTargets).userId;
         stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, wolfTargetId: randomTarget } });
         
         const targetName = (await guild.members.fetch(randomTarget)).displayName;

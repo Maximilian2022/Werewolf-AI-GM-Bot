@@ -26,8 +26,10 @@ import { createAudioPlayer, createAudioResource, StreamType } from '@discordjs/v
 import { Readable } from 'node:stream';
 import { TTSService } from '../services/TTSService.js';
 import { MSG } from '../messages.js';
+import { secureRandomId } from '../utils/cryptoRandom.js';
 
 export class CommandHandler {
+
   private static splitMessage(text: string, maxLength = 1900): string[] {
     if (text.length <= maxLength) return [text];
     const lines = text.split('\n');
@@ -192,7 +194,7 @@ export class CommandHandler {
     const guild = interaction.guild!;
     const member = interaction.member as GuildMember;
     const voiceChannel = member.voice.channel;
-    const gameId = Math.random().toString(36).substring(2, 8);
+    const gameId = secureRandomId(6);
 
     if (!voiceChannel) {
       await interaction.editReply('❌ エラー: ボイスチャンネルに参加してから実行してください。');

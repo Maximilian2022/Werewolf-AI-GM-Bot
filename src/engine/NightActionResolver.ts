@@ -5,6 +5,8 @@
 import { Player } from '../types.js';
 import { RoleRegistry } from '../roles/RoleRegistry.js';
 import { NightInputActions, NightResolutionOutput, SeerResultDetail } from './types.js';
+import { secureSample } from '../utils/cryptoRandom.js';
+
 
 export interface NightContext {
   loversUserIds?: [string, string];
@@ -209,7 +211,7 @@ export class NightActionResolver {
       if (trappedUserId !== null && wolfTargetId === trappedUserId) {
         logs.push(`[罠師迎撃] 人狼が罠にかかりました (Target: ${wolfTargetId})`);
         if (aliveWolves.length > 0 && !trappedWolfUserId) {
-          const trappedWolf = aliveWolves[Math.floor(Math.random() * aliveWolves.length)];
+          const trappedWolf = secureSample(aliveWolves);
           trappedWolfUserId = trappedWolf.userId;
           killedSet.add(trappedWolf.userId);
           logs.push(`[罠師討伐] 襲撃した人狼が罠にかかり死亡しました (Wolf: ${trappedWolf.userId})`);
@@ -251,7 +253,7 @@ export class NightActionResolver {
         killedSet.add(wolfTargetId);
         logs.push(`[襲撃死] 猫又が襲撃されました (Target: ${wolfTargetId})`);
         if (aliveWolves.length > 0) {
-          const revengeWolf = aliveWolves[Math.floor(Math.random() * aliveWolves.length)];
+          const revengeWolf = secureSample(aliveWolves);
           killedSet.add(revengeWolf.userId);
           logs.push(`[猫又道連れ] 襲撃した人狼が道連れになりました (Wolf: ${revengeWolf.userId})`);
         }
@@ -263,7 +265,7 @@ export class NightActionResolver {
         if (!hunterVictimId || !alivePlayers.some(p => p.userId === hunterVictimId && p.userId !== wolfTargetId)) {
           const others = alivePlayers.filter(p => p.userId !== wolfTargetId);
           if (others.length > 0) {
-            hunterVictimId = others[Math.floor(Math.random() * others.length)].userId;
+            hunterVictimId = secureSample(others).userId;
           }
         }
         if (hunterVictimId) {
