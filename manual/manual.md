@@ -453,6 +453,15 @@ Express 5ベースのWebサーバー（デフォルトポート: 3000）が稼�
 > - 登録データはサーバーローカルの `data/zoom_profiles.json` に安全にアトミック保存され、API返却時には Client Secret が自動的にマスク処理（`****xxxx`）されます。
 > - ミーティング主催者（ホスト）がこのキーを所持している必要はなく、参加者の誰か1人が登録していれば問題ありません。
 
+#### Zoom App Marketplace 作成時の必須設定項目
+Zoom App 作成画面で入力を求められる以下の項目には、次のように設定してください：
+
+| 設定項目 | 推奨入力値 | 説明 |
+| :--- | :--- | :--- |
+| **OAuth redirect URL** | `https://jinrougmbot.kenko.land` | 認証コールバック先URL。自サイトのダッシュボード公開URL（または `https://example.com`）を入力します。 |
+| **OAuth allow lists** | `https://jinrougmbot.kenko.land` | リダイレクトが許可されるドメイン。上記と同じドメインを指定します。 |
+| **Scopes (権限)** | `meeting:read:meeting`<br>`meeting:write:meeting` | **Meeting** カテゴリから選択。ミーティング情報の参照およびブレイクアウトルーム等の制御権限です。 |
+
 ---
 
 ### 12.2 ZoomProfileManager と署名生成アーキテクチャ

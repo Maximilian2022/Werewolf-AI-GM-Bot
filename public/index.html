@@ -1004,17 +1004,41 @@
                 <div class="guide-step-body">
                   <ol>
                     <li><a href="https://marketplace.zoom.us/develop/create" target="_blank" rel="noopener">Zoom App Marketplace (作成画面)</a> にログイン。</li>
-                    <li><strong>「Meeting SDK」</strong> アプリカードの <strong>「Create」</strong> をクリック。</li>
+                    <li><strong>「Meeting SDK」</strong>（または General App）を選択して <strong>「Create」</strong> をクリック。</li>
                     <li>アプリ名（例: <code>Werewolf GM Bot</code>）を入力します。</li>
-                    <li>公開審査は不要です（社内/開発用としてそのまま利用可能）。</li>
+                    <li>公開審査は不要です（社内・プライベート開発用としてそのまま利用可能）。</li>
                   </ol>
                 </div>
               </div>
 
-              <!-- STEP 3 -->
+              <!-- STEP 3 (新規追加: OAuth & Scopes 設定) -->
               <div class="guide-step-card">
                 <div class="guide-step-header">
                   <span class="guide-step-badge">STEP 3</span>
+                  <h4 class="guide-step-title">OAuth設定 & Scopes（権限）</h4>
+                </div>
+                <div class="guide-step-body">
+                  <p>アプリ設定画面の各項目に以下を入力・選択します：</p>
+                  <ul>
+                    <li><strong>OAuth Redirect URL:</strong><br>
+                      <code>https://jinrougmbot.kenko.land</code><br>
+                      <span class="text-xs text-muted">（または <code>https://example.com</code> 等のhttps形式URL）</span>
+                    </li>
+                    <li><strong>OAuth Allow Lists:</strong><br>
+                      <code>https://jinrougmbot.kenko.land</code>
+                    </li>
+                    <li><strong>Scopes (権限):</strong> 「Add Scopes」➔「Meeting」から以下を追加：<br>
+                      - <code>meeting:read:meeting</code> (閲覧)<br>
+                      - <code>meeting:write:meeting</code> (BOルーム管理等)
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <!-- STEP 4 -->
+              <div class="guide-step-card">
+                <div class="guide-step-header">
+                  <span class="guide-step-badge">STEP 4</span>
                   <h4 class="guide-step-title">認証キーを取得して登録</h4>
                 </div>
                 <div class="guide-step-body">
@@ -1026,10 +1050,10 @@
                 </div>
               </div>
 
-              <!-- STEP 4 -->
+              <!-- STEP 5 -->
               <div class="guide-step-card">
                 <div class="guide-step-header">
-                  <span class="guide-step-badge">STEP 4</span>
+                  <span class="guide-step-badge">STEP 5</span>
                   <h4 class="guide-step-title">ゲームの開始と自動進行</h4>
                 </div>
                 <div class="guide-step-body">
