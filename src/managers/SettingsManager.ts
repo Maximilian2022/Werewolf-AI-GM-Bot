@@ -28,6 +28,9 @@ export interface SystemSettings {
   mvpMode: 'discussion' | 'contribution' | 'compare';
   aiTone: 'gentle' | 'normal' | 'spicy' | 'extreme'; 
   regulation: string; 
+  enableAIRecording?: boolean; // 🎙️ AI総評・音声録音の有効化（デフォルト true）
+  enableRegulationAnnouncement?: boolean; // 📜 ゲーム開始時のレギュレーション読み上げ有効化（デフォルト true）
+  gmPasscode?: string;        // 🔑 進行中モニター解除用パスコード（デフォルト '1234'）
 }
 
 export interface AppSettings {
@@ -70,7 +73,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     aiModel: 'gemini-flash-latest',
     mvpMode: 'compare',
     aiTone: 'normal',
-    regulation: '標準レギュレーション（11人/13人）'
+    regulation: '標準レギュレーション（11人/13人）',
+    enableAIRecording: true,
+    enableRegulationAnnouncement: true,
+    gmPasscode: '1234'
   }
 };
 // ゲームの設定を管理するシングルトンマネージャー。設定は通常モードとデバッグモードの両方を持ち、さらにシステム全体で使用される設定も管理する。設定はJSONファイルに保存され、アプリケーションの起動時に読み込まれる。設定の更新やリセットも可能で、更新が行われるたびにファイルに保存される。設定の取得は、現在のモード（通常/デバッグ）に応じて適切な設定を返す。

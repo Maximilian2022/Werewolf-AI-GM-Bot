@@ -16,6 +16,13 @@ import { DiscordService } from '../services/DiscordService.js';
 import { WorkerManager } from '../managers/WorkerManager.js';
 import { VCWatcher } from '../managers/VCWatcher.js';
 import { AIService } from '../services/AIService.js';
+import { RoleRegistry } from '../roles/RoleRegistry.js';
+import { RegulationManager } from '../regulations/RegulationManager.js';
+import { PRESET_REGULATIONS } from '../regulations/presets.js';
+import { NightActionResolver } from '../engine/NightActionResolver.js';
+import { ExecutionResolver } from '../engine/ExecutionResolver.js';
+import { WinConditionChecker } from '../engine/WinConditionChecker.js';
+import { WinningTeam } from '../engine/types.js';
 import { GAME_CONSTANTS } from '../constants.js';
 import { Player, GameState } from '../types.js';
 import { Logger } from '../utils/logger.js';
@@ -39,14 +46,13 @@ export class PhaseHandler {
     return arr;
   }
 
-  private static checkWinCondition(state: GameState): '村人陣営' | '人狼陣営' | null {
-    const alivePlayers = state.players.filter((p: Player) => p.isAlive);
-    const aliveWolves = alivePlayers.filter((p: Player) => p.role === '人狼').length;
-    const aliveVillagers = alivePlayers.length - aliveWolves;
-
-    if (aliveWolves === 0) return '村人陣営';
-    else if (aliveWolves >= aliveVillagers) return '人狼陣営';
-    return null;
+  private static checkWinCondition(state: GameState, specialWin?: { undertakerWin?: boolean; foolWin?: boolean }): WinningTeam {
+    return WinConditionChecker.check(state.players, specialWin, {
+      loversUserIds: state.loversUserIds,
+      femmeFataleData: state.femmeFataleData,
+      livingSpiritData: state.livingSpiritData,
+      queenUserId: state.queenUserId
+    });
   }
 
   private static splitMessage(text: string, maxLength = 1900): string[] {
@@ -159,10 +165,67 @@ export class PhaseHandler {
     const guild = await gmClient.guilds.fetch(state.serverId);
     const settings = state.settingsSnapshot;
 
+    const regMgr = RegulationManager.getInstance();
+    const currentReg = (state.regulationId ? regMgr.get(state.regulationId) : null) 
+      || regMgr.getByPlayerCount(state.players.length)[0] 
+      || PRESET_REGULATIONS[0];
+
+    // レギュレーション独自の時間設定があれば settingsSnapshot に反映
+    let settingsSnapshot = state.settingsSnapshot;
+    if (currentReg.times) {
+      settingsSnapshot = { ...settingsSnapshot, ...currentReg.times };
+    }
+
+    // 📜 レギュレーション読み上げの有効化判定 (レギュレーション設定優先、なければ全体設定、デフォルトtrue)
+    const sysSettings = SettingsManager.getInstance().getSystem();
+    const isAnnouncementEnabled = currentReg.system?.enableRegulationAnnouncement !== undefined
+      ? currentReg.system.enableRegulationAnnouncement
+      : (sysSettings.enableRegulationAnnouncement !== false);
+
     const originalVc = await guild.channels.fetch(state.originalVcId) as VoiceBasedChannel;
     if (originalVc && originalVc.isVoiceBased()) {
       const connection = await VoiceService.connectWithClient(gmClient, originalVc, gameId, 'lobby');
-      const audio = await TTSService.generateAudio(MSG.VOICE.GREETING, gameId, 'greeting');
+      
+      let greetingText: string;
+      if (isAnnouncementEnabled) {
+        // 役職構成サマリーの生成 (標準的な順序で並べる)
+        const roleOrder = ['村人', '人狼', '占い師', '騎士', '霊媒師', '狂人', '狂信者', '共有者', '妖狐', '背徳者', '猫又', 'てるてる坊主', '棺桶屋', '未熟な占い師', '無謀な占い師', '狐憑き', 'パン屋'];
+        const roleParts: string[] = [];
+        
+        for (const rName of roleOrder) {
+          const count = currentReg.roles[rName] || 0;
+          if (count > 0) roleParts.push(`${rName}${count}名`);
+        }
+        for (const [rName, count] of Object.entries(currentReg.roles)) {
+          if (count > 0 && !roleOrder.includes(rName)) {
+            roleParts.push(`${rName}${count}名`);
+          }
+        }
+        const rolesSummary = roleParts.join('、') || '役職なし';
+
+        // 主要ルールの要約
+        const ruleParts: string[] = [];
+        if (currentReg.rules) {
+          if (currentReg.rules.firstNightDivination === 'white_npc') ruleParts.push('初日のお告げあり');
+          else if (currentReg.rules.firstNightDivination === 'free') ruleParts.push('初日自由占いあり');
+          else if (currentReg.rules.firstNightDivination === 'none') ruleParts.push('初日占いなし');
+
+          if (currentReg.rules.consecutiveGuard) ruleParts.push('連続護衛可能');
+          else ruleParts.push('連続護衛なし');
+        }
+        const rulesSummary = ruleParts.join('、');
+
+        greetingText = MSG.VOICE.REGULATION_ANNOUNCE({
+          playerCount: currentReg.playerCount || state.players.length,
+          rolesSummary,
+          rulesSummary,
+          day1DiscussionMin: settingsSnapshot.day1DiscussionMin
+        });
+      } else {
+        greetingText = MSG.VOICE.GREETING;
+      }
+
+      const audio = await TTSService.generateAudio(greetingText, gameId, isAnnouncementEnabled ? 'reg_announce' : 'greeting');
       await VoiceService.playAudio(connection, audio, gameId);
       await new Promise(resolve => setTimeout(resolve, 1000));
       connection.destroy();
@@ -171,11 +234,11 @@ export class PhaseHandler {
 
     let updatedPlayers = state.players;
     if (state.players.some(p => p.role === null)) {
-      const rolesToAssign = GAME_CONSTANTS.ROLES[state.players.length as 11 | 13];
+      const rolesToAssign = regMgr.expandRoleList(currentReg);
       const shuffledRoles = this.shuffleArray(rolesToAssign);
       updatedPlayers = state.players.map((player: Player, index: number) => ({
         ...player, 
-        role: shuffledRoles[index],
+        role: shuffledRoles[index] || '村人',
       }));
 
       const roleMapPromises = updatedPlayers.map(async p => {
@@ -184,7 +247,12 @@ export class PhaseHandler {
       });
       const rolesStr = (await Promise.all(roleMapPromises)).join(', ');
       
-      stateManager.updateState({ players: updatedPlayers, day: 1, eventLogs: [`[セットアップ] 実際の配役: ${rolesStr}`] });
+      stateManager.updateState({ 
+        players: updatedPlayers, 
+        day: 1, 
+        settingsSnapshot,
+        eventLogs: [`[セットアップ] 実際の配役: ${rolesStr}`] 
+      });
     } else {
       Logger.info('PhaseHandler', '🎭 役職は既に配布済みのため、再配布をスキップします', gameId);
     }
@@ -230,15 +298,18 @@ export class PhaseHandler {
       await wolfTextCh.permissionOverwrites.create(w.userId, { ViewChannel: true, SendMessages: false });
     }
 
-    const seer = updatedPlayers.find(p => p.role === '占い師');
+    // 初日占い（お告げ・白通知）の判定
+    const isWhiteNpcRule = currentReg.rules?.firstNightDivination === 'white_npc';
+
+    const seer = updatedPlayers.find(p => p.role === '占い師' || p.role === '未熟な占い師' || p.role === '無謀な占い師');
     let firstWhiteTarget: Player | null = null;
-    if (seer) {
+    if (seer && isWhiteNpcRule) {
       const currentState = stateManager.getState();
       if (currentState.firstWhiteTargetId) {
         firstWhiteTarget = updatedPlayers.find(p => p.userId === currentState.firstWhiteTargetId) || null;
       }
       if (!firstWhiteTarget) {
-        const safeTargets = updatedPlayers.filter(p => p.role !== '人狼' && p.role !== '占い師');
+        const safeTargets = updatedPlayers.filter(p => p.role !== '人狼' && p.role !== '占い師' && p.role !== '未熟な占い師' && p.role !== '無謀な占い師');
         firstWhiteTarget = this.shuffleArray(safeTargets)[0] || null;
         if (firstWhiteTarget) {
           stateManager.updateState({ firstWhiteTargetId: firstWhiteTarget.userId });
@@ -246,18 +317,71 @@ export class PhaseHandler {
       }
     }
 
+    // 女王の確認
+    const queenPlayer = updatedPlayers.find(p => p.role === '女王');
+    if (queenPlayer) {
+      stateManager.updateState({ queenUserId: queenPlayer.userId });
+    }
+    const queenMember = queenPlayer ? await guild.members.fetch(queenPlayer.userId).catch(() => null) : null;
+
+    // 神様への通知（全員の役職）
+    const godPlayer = updatedPlayers.find(p => p.role === '神様');
+    if (godPlayer) {
+      (async () => {
+        const allRolesText = (await Promise.all(updatedPlayers.map(async p => {
+          const m = await guild.members.fetch(p.userId).catch(() => null);
+          return `・${m?.displayName || '不明'}: **${p.role}**`;
+        }))).join('\n');
+        await this.sendToPersonalChannel(guild, godPlayer.userId, MSG.CHAT.DM_GOD_INFO(allRolesText));
+      })();
+    }
+
+    // 人狼一覧の名前取得（狂信者・内通者・眷属案内用）
+    const wolfNames = (await Promise.all(wolves.map(async w => {
+      const m = await guild.members.fetch(w.userId).catch(() => null);
+      return m?.displayName || '不明な人狼';
+    }))).join('、');
+
+    // 共有者一覧（共有者案内用）
+    const masons = updatedPlayers.filter(p => p.role === '共有者');
+
+    const roleReg = RoleRegistry.getInstance();
+    const citizenRolesList = [
+      '村人', '占い師', '霊媒師', '騎士', '未熟な占い師', '無謀な占い師',
+      '共有者', '猫又', 'パン屋', 'ハンター', '独裁者', 'タフガイ', '罠師',
+      'カウンセラー', '占い師の弟子'
+    ];
+
     for (const player of updatedPlayers) {
       actionQueue.add(async () => {
+        const roleObj = roleReg.get(player.role as string);
         let message = MSG.CHAT.DM_ROLE_HEADER + MSG.CHAT.DM_ROLE_YOUR_ROLE(player.role as string);
-        if (player.role === '人狼') {
+
+        if (player.role === '人狼' || player.role === '人狼の子ども' || player.role === '凶暴な狼') {
           message += MSG.CHAT.DM_ROLE_WOLF_GUIDE;
-        } else if (player.role === '占い師' && firstWhiteTarget) {
+        } else if (player.role === '狂信者' || player.role === '内通者') {
+          message += `\n👁️ あなたは【${player.role}】です。仲間の人狼は **${wolfNames || 'なし'}** です。\n人狼の勝利を目指して立ち回ってください。`;
+        } else if (player.role === '狼の眷属') {
+          message += `\n🐕 あなたは【狼の眷属】です。仲間の人狼は **${wolfNames || 'なし'}** です。\n毎晩人狼VCに入って通話・作戦会議に参加できます。`;
+        } else if (player.role === '一匹狼') {
+          message += `\n🐺 あなたは【一匹狼】です。通常の人狼VCには参加しません。\n通常の人狼が全滅し、かつあなたが最後まで生き残れば単独勝利となります。`;
+        } else if (player.role === '共有者') {
+          const partner = masons.find(m => m.userId !== player.userId);
+          const partnerMember = partner ? await guild.members.fetch(partner.userId).catch(() => null) : null;
+          message += `\n🤝 あなたは【共有者】です。もう1人の共有者は **${partnerMember?.displayName || 'なし'}** です。`;
+        } else if ((player.role === '占い師' || player.role === '未熟な占い師' || player.role === '無謀な占い師') && firstWhiteTarget) {
           const targetMember = await guild.members.fetch(firstWhiteTarget.userId).catch(() => null);
           if (targetMember) message += MSG.CHAT.DM_ROLE_SEER_FIRST(targetMember.displayName);
-          message += MSG.CHAT.DM_ROLE_WAIT;
-        } else {
-          message += MSG.CHAT.DM_ROLE_WAIT;
+        } else if (roleObj) {
+          message += `\n📖 **役職説明:** ${roleObj.description}`;
         }
+
+        // 市民陣営への女王認知通知
+        if (queenMember && citizenRolesList.includes(player.role as string)) {
+          message += `\n` + MSG.CHAT.DM_QUEEN_INFO(queenMember.displayName);
+        }
+        
+        message += MSG.CHAT.DM_ROLE_WAIT;
         await this.sendToPersonalChannel(guild, player.userId, message);
       }, `distribute-role-${player.userId}`);
     }
@@ -282,7 +406,9 @@ export class PhaseHandler {
       if (nightWorkerConn) nightWorkerConn._isBusy = true;
     }
 
-    const aliveWolves = stateManager.getState().players.filter((p: Player) => p.role === '人狼' && p.isAlive);
+    // 人狼VC参加権限: 人狼、人狼の子ども、凶暴な狼、狼の眷属（※一匹狼は除外）
+    const wolfRolesForVc = ['人狼', '人狼の子ども', '凶暴な狼', '狼の眷属'];
+    const aliveWolves = stateManager.getState().players.filter((p: Player) => wolfRolesForVc.includes(p.role as string) && p.isAlive);
     for (const wolf of aliveWolves) {
       actionQueue.add(async () => {
         try {
@@ -320,6 +446,119 @@ export class PhaseHandler {
           } catch(e) {}
         }
       }
+    }
+
+    // キューピット、悪女、生霊の初日夜選択アクション
+    const cupidPlayer = updatedPlayers.find(p => p.role === 'キューピット');
+    const femmeFatalePlayer = updatedPlayers.find(p => p.role === '悪女');
+    const livingSpiritPlayer = updatedPlayers.find(p => p.role === '生霊');
+
+    const firstNightActionPromises: Promise<void>[] = [];
+
+    if (cupidPlayer) {
+      firstNightActionPromises.push((async () => {
+        try {
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('cupid_select')
+            .setPlaceholder('恋人にする2名を選択')
+            .setMinValues(2)
+            .setMaxValues(2);
+          for (const p of updatedPlayers) {
+            const m = await guild.members.fetch(p.userId).catch(() => null);
+            if (m) selectMenu.addOptions({ label: m.displayName, value: p.userId });
+          }
+          const msg = await this.sendToPersonalChannel(guild, cupidPlayer.userId, {
+            content: '💘 **【キューピットの恋人の矢】**\n運命を共にする恋人2名を選択してください：',
+            components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+          });
+          if (msg) {
+            const i = await msg.awaitMessageComponent({ componentType: ComponentType.StringSelect, time: settings.wolfMeetingMin * 60000 }).catch(() => null);
+            if (i) {
+              const [p1Id, p2Id] = i.values;
+              stateManager.updateState({ loversUserIds: [p1Id, p2Id] });
+              await i.deferUpdate().catch(() => {});
+              await msg.delete().catch(() => {});
+              const m1 = await guild.members.fetch(p1Id).catch(() => null);
+              const m2 = await guild.members.fetch(p2Id).catch(() => null);
+              await this.sendToPersonalChannel(guild, p1Id, MSG.CHAT.DM_LOVERS_INFO(m2?.displayName || '不明'));
+              await this.sendToPersonalChannel(guild, p2Id, MSG.CHAT.DM_LOVERS_INFO(m1?.displayName || '不明'));
+            }
+          }
+        } catch (e) {}
+      })());
+    }
+
+    if (femmeFatalePlayer) {
+      firstNightActionPromises.push((async () => {
+        try {
+          const others = updatedPlayers.filter(p => p.userId !== femmeFatalePlayer.userId);
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('femme_fatale_select')
+            .setPlaceholder('本命1名を選択')
+            .setMinValues(1)
+            .setMaxValues(1);
+          for (const p of others) {
+            const m = await guild.members.fetch(p.userId).catch(() => null);
+            if (m) selectMenu.addOptions({ label: m.displayName, value: p.userId });
+          }
+          const msg = await this.sendToPersonalChannel(guild, femmeFatalePlayer.userId, {
+            content: '💋 **【悪女の誘惑】**\nあなたの「本命」を1名選択してください：',
+            components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+          });
+          if (msg) {
+            const i = await msg.awaitMessageComponent({ componentType: ComponentType.StringSelect, time: settings.wolfMeetingMin * 60000 }).catch(() => null);
+            if (i) {
+              const honeyId = i.values[0];
+              const pawnIds = others.filter(p => p.userId !== honeyId).map(p => p.userId);
+              stateManager.updateState({
+                femmeFataleData: { femmeFataleId: femmeFatalePlayer.userId, honeyId, pawnIds }
+              });
+              await i.deferUpdate().catch(() => {});
+              await msg.delete().catch(() => {});
+              const ffMember = await guild.members.fetch(femmeFatalePlayer.userId).catch(() => null);
+              await this.sendToPersonalChannel(guild, honeyId, MSG.CHAT.DM_LOVERS_INFO(ffMember?.displayName || '悪女'));
+              for (const pawnId of pawnIds) {
+                await this.sendToPersonalChannel(guild, pawnId, MSG.CHAT.DM_LOVERS_INFO(ffMember?.displayName || '悪女'));
+              }
+            }
+          }
+        } catch (e) {}
+      })());
+    }
+
+    if (livingSpiritPlayer) {
+      firstNightActionPromises.push((async () => {
+        try {
+          const others = updatedPlayers.filter(p => p.userId !== livingSpiritPlayer.userId && p.role !== '生霊');
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('living_spirit_select')
+            .setPlaceholder('憑依する対象を1名選択')
+            .setMinValues(1)
+            .setMaxValues(1);
+          for (const p of others) {
+            const m = await guild.members.fetch(p.userId).catch(() => null);
+            if (m) selectMenu.addOptions({ label: m.displayName, value: p.userId });
+          }
+          const msg = await this.sendToPersonalChannel(guild, livingSpiritPlayer.userId, {
+            content: '👻 **【生霊の憑依】**\n憑依する対象を1名選択してください（その人物が死亡した際、役職を引き継ぎます）：',
+            components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+          });
+          if (msg) {
+            const i = await msg.awaitMessageComponent({ componentType: ComponentType.StringSelect, time: settings.wolfMeetingMin * 60000 }).catch(() => null);
+            if (i) {
+              const targetId = i.values[0];
+              const currentSpiritData = stateManager.getState().livingSpiritData || {};
+              stateManager.updateState({
+                livingSpiritData: { ...currentSpiritData, [livingSpiritPlayer.userId]: targetId }
+              });
+              await i.deferUpdate().catch(() => {});
+              await msg.delete().catch(() => {});
+              const tMember = await guild.members.fetch(targetId).catch(() => null);
+              await this.sendToPersonalChannel(guild, livingSpiritPlayer.userId, `✅ **${tMember?.displayName || '対象'}** に憑依しました。対象が死亡した瞬間に能力を引き継ぎます。`);
+            }
+          }
+        } catch (e) {}
+      })());
     }
 
     let firstNightTargetUnixTime = Math.floor(Date.now() / 1000) + (settings.wolfMeetingMin * 60);
@@ -464,11 +703,78 @@ export class PhaseHandler {
 
         const timerMsg = await voteChannel.send(MSG.CHAT.DAY_TIMER_START(state.day, targetUnixTime));
 
+        // 独裁者COボタンのセットアップ
+        let dictatorTriggered = false;
+        let dictatorTargetId: string | null = null;
+        let dictatorMsg: any = null;
+
+        const dictatorPlayer = alivePlayers.find(p => p.role === '独裁者');
+        if (dictatorPlayer && !state.dictatorUsed) {
+          const dictatorBtn = new ButtonBuilder()
+            .setCustomId('dictator_co_btn')
+            .setLabel(MSG.CHAT.DICTATOR_BUTTON_LABEL)
+            .setStyle(ButtonStyle.Danger);
+          dictatorMsg = await this.sendToPersonalChannel(guild, dictatorPlayer.userId, {
+            content: '👑 **【独裁者CO】**\nこのボタンを押すと、昼の議論を強制終了し、独断で即時処刑を実行できます（ゲーム中1回のみ）：',
+            components: [new ActionRowBuilder<ButtonBuilder>().addComponents(dictatorBtn)]
+          });
+          if (dictatorMsg) {
+            const collector = dictatorMsg.createMessageComponentCollector({ componentType: ComponentType.Button, time: totalDiscussionMs });
+            collector.on('collect', async (btnInt: ButtonInteraction) => {
+              if (btnInt.user.id !== dictatorPlayer.userId) return;
+              dictatorTriggered = true;
+              stateManager.updateState({ dictatorUsed: true });
+              await btnInt.deferUpdate().catch(() => {});
+              await dictatorMsg.delete().catch(() => {});
+              collector.stop();
+
+              // 全員ミュート
+              for (const player of alivePlayers) {
+                try {
+                  const m = await guild.members.fetch(player.userId);
+                  if (m.voice.channelId) await m.voice.setMute(true);
+                } catch(e) {}
+              }
+
+              // メインチャット通知 & GM音声
+              const dictatorMember = await guild.members.fetch(dictatorPlayer.userId).catch(() => null);
+              await voteChannel.send(MSG.CHAT.DICTATOR_CO_ANNOUNCE(dictatorMember?.displayName || '独裁者'));
+              const dictatorAudio = await TTSService.generateAudio(MSG.VOICE.DICTATOR_CO, gameId, 'dictator_co');
+              await VoiceService.broadcastAudio(broadcastConns, dictatorAudio, gameId);
+
+              // 独裁者処刑選択UI
+              const others = alivePlayers.filter(p => p.userId !== dictatorPlayer.userId);
+              const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId('dictator_exec_select')
+                .setPlaceholder('処刑する対象を選択');
+              for (const target of others) {
+                const targetM = await guild.members.fetch(target.userId).catch(() => null);
+                if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+              }
+              const selectMsg = await this.sendToPersonalChannel(guild, dictatorPlayer.userId, {
+                content: '👑 **【独裁処刑】** 処刑するプレイヤーを選択してください：',
+                components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+              });
+              if (selectMsg) {
+                const selectInt = await selectMsg.awaitMessageComponent({ componentType: ComponentType.StringSelect, time: 60000 }).catch(() => null);
+                if (selectInt) {
+                  dictatorTargetId = selectInt.values[0];
+                  await selectInt.deferUpdate().catch(() => {});
+                  await selectMsg.delete().catch(() => {});
+                } else {
+                  dictatorTargetId = others[Math.floor(Math.random() * others.length)].userId;
+                }
+              }
+            });
+          }
+        }
+
         let remainAnnounced = false;
         const intervalMs = 10000; 
         let elapsed = 0;
 
         while (elapsed < totalDiscussionMs) {
+          if (dictatorTriggered) break;
           let currentState: GameState;
           try {
             currentState = StateManager.getInstance().getState();
@@ -524,6 +830,17 @@ export class PhaseHandler {
               remainAnnounced = true;
               await voteChannel.send(MSG.CHAT.DAY_REMAIN_1M);
           }
+        }
+
+        if (dictatorMsg) await dictatorMsg.delete().catch(() => {});
+
+        // 独裁処刑が発動した場合は、投票フェーズをスキップして即座に処刑フェーズへ遷移
+        if (dictatorTriggered && dictatorTargetId) {
+          stateManager.updateState({ executedUserId: dictatorTargetId });
+          stateManager.nextPhase('execution');
+          VoiceService.handlePhaseTransition(gameId, 'execution');
+          await this.handleExecutionPhase(gmClient, assistantClient as Client, gameId, dictatorTargetId);
+          return;
         }
 
         const endAudio = await TTSService.generateAudio(MSG.VOICE.DAY_END, gameId, `day_end_${state.day}`);
@@ -1173,6 +1490,30 @@ export class PhaseHandler {
       }, `unmute-lastword-${executedUserId}`);
       await actionQueue.waitForEmpty();
 
+      // ハンター処刑時の道連れ選択UI
+      let hunterRevengeTargetId: string | undefined;
+      const isHunterExecuted = state.players.find(p => p.userId === executedUserId)?.role === 'ハンター';
+      let hMsg: any = null;
+      if (isHunterExecuted) {
+        const remainingAlive = state.players.filter(p => p.isAlive && p.userId !== executedUserId);
+        const hunterMenu = new StringSelectMenuBuilder().setCustomId('hunter_exec').setPlaceholder('道連れにする対象を選択');
+        for (const t of remainingAlive) {
+          const tm = await guild.members.fetch(t.userId).catch(() => null);
+          if (tm) hunterMenu.addOptions({ label: tm.displayName, value: t.userId });
+        }
+        hMsg = await this.sendToPersonalChannel(guild, executedUserId, {
+          content: MSG.CHAT.HUNTER_EXEC_PROMPT,
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(hunterMenu)]
+        });
+        if (hMsg) {
+          hMsg.awaitMessageComponent({ componentType: ComponentType.StringSelect, time: sysTimeMs.LAST_WORD }).then(async (hi: any) => {
+            hunterRevengeTargetId = hi.values[0];
+            await hi.deferUpdate().catch(() => {});
+            await hMsg.delete().catch(() => {});
+          }).catch(() => {});
+        }
+      }
+
       let targetUnixTime = Math.floor(Date.now() / 1000) + (sysTimeMs.LAST_WORD / 1000);
       const lwMsg = await voteChannel.send(MSG.CHAT.EXEC_LAST_WORD_START(executedName, targetUnixTime));
       
@@ -1189,11 +1530,111 @@ export class PhaseHandler {
 
       await this.waitWithPauseAndCondition(sysTimeMs.LAST_WORD);
       clearInterval(uiUpdateInterval);
+      if (hMsg) await hMsg.delete().catch(() => {});
       await lwMsg.edit(MSG.CHAT.EXEC_LAST_WORD_END(executedName)).catch(()=>{});
 
       const updatedPlayers = state.players.map((p: Player) => p.userId === executedUserId ? { ...p, isAlive: false } : p);
       state.eventLogs.push(`[第${state.day}日 昼] ${executedName} が処刑された`);
       stateManager.updateState({ players: updatedPlayers, eventLogs: state.eventLogs });
+
+      // 処刑フェーズの能力解決 (棺桶屋、てるてる坊主、猫又、黒猫、ハンター、人狼の子ども、恋人、女王)
+      const execResult = ExecutionResolver.resolve(stateManager.getState().players, {
+        executedUserId,
+        undertakerTargetId: stateManager.getState().nightActions.undertakerTargetId,
+        undertakerHitCount: stateManager.getState().undertakerHitCount || 0,
+        hunterRevengeTargetId
+      }, {
+        loversUserIds: stateManager.getState().loversUserIds,
+        femmeFataleData: stateManager.getState().femmeFataleData,
+        livingSpiritData: stateManager.getState().livingSpiritData,
+        queenUserId: stateManager.getState().queenUserId
+      });
+
+      if (execResult.undertakerHit) {
+        stateManager.updateState({ undertakerHitCount: execResult.undertakerNewHitCount });
+        if (execResult.undertakerAnnouncement) {
+          await voteChannel.send(`⚰️ **棺桶屋の噂:** ${execResult.undertakerAnnouncement}`);
+          if (mainVcChannel) {
+            const gmConnection = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'undertaker');
+            const audio = await TTSService.generateAudio(execResult.undertakerAnnouncement, gameId, `undertaker_announce_${state.day}`);
+            await VoiceService.playAudio(gmConnection, audio, gameId).catch(() => {});
+          }
+        }
+      }
+
+      if (execResult.wolfCubKilled) {
+        stateManager.updateState({ wolfCubRevenge: true });
+        await voteChannel.send(`🐺 **人狼の子どもの死:** 人狼たちが激怒し、今夜の襲撃が2回になります！`);
+        if (mainVcChannel) {
+          const gmConn = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'wolf_cub');
+          const audio = await TTSService.generateAudio(MSG.VOICE.WOLF_CUB_ENRAGED, gameId, `wolf_cub_${state.day}`);
+          await VoiceService.playAudio(gmConn, audio, gameId).catch(() => {});
+        }
+      }
+
+      if (execResult.blackCatRevengeKilledUserId) {
+        const bcVictim = await guild.members.fetch(execResult.blackCatRevengeKilledUserId).catch(() => null);
+        await voteChannel.send(`🐈‍⬛ **黒猫の呪い:** ${bcVictim?.displayName || '誰か'} が道連れとなり死亡しました！`);
+        if (mainVcChannel) {
+          const gmConn = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'black_cat');
+          const audio = await TTSService.generateAudio(MSG.VOICE.BLACK_CAT_REVENGE(bcVictim?.displayName || 'プレイヤー'), gameId, `bc_${state.day}`);
+          await VoiceService.playAudio(gmConn, audio, gameId).catch(() => {});
+        }
+      }
+
+      if (execResult.hunterRevengeKilledUserId) {
+        const hVictim = await guild.members.fetch(execResult.hunterRevengeKilledUserId).catch(() => null);
+        await voteChannel.send(`🏹 **ハンターの道連れ:** 銃声が響き渡り、${hVictim?.displayName || '誰か'} が道連れとなりました！`);
+        if (mainVcChannel) {
+          const gmConn = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'hunter');
+          const audio = await TTSService.generateAudio(MSG.VOICE.HUNTER_SHOOT(hVictim?.displayName || 'プレイヤー'), gameId, `hunter_${state.day}`);
+          await VoiceService.playAudio(gmConn, audio, gameId).catch(() => {});
+        }
+      }
+
+      if (execResult.loversFollowerUserIds.length > 0) {
+        for (const loverId of execResult.loversFollowerUserIds) {
+          const loverM = await guild.members.fetch(loverId).catch(() => null);
+          await voteChannel.send(`💕 **恋人の後追い死:** 愛する者の死に伴い、${loverM?.displayName || '恋人'} が息絶えました...`);
+          if (mainVcChannel) {
+            const gmConn = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'lovers');
+            const audio = await TTSService.generateAudio(MSG.VOICE.LOVERS_FOLLOW(loverM?.displayName || '恋人'), gameId, `lover_${loverId}`);
+            await VoiceService.playAudio(gmConn, audio, gameId).catch(() => {});
+          }
+        }
+      }
+
+      if (execResult.queenDied) {
+        if (execResult.livingSpiritInheritedQueenUserId) {
+          const newQueenM = await guild.members.fetch(execResult.livingSpiritInheritedQueenUserId).catch(() => null);
+          await voteChannel.send(`👑 **生霊が新女王に即位:** 生霊が女王の遺志を継ぎ、${newQueenM?.displayName || '新女王'} が新たな女王となりました！市民のショック死は回避されました。`);
+          stateManager.updateState({ queenUserId: execResult.livingSpiritInheritedQueenUserId });
+          if (mainVcChannel) {
+            const gmConn = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'queen_inherit');
+            const audio = await TTSService.generateAudio(MSG.VOICE.QUEEN_INHERITED(newQueenM?.displayName || '新女王'), gameId, `qi_${state.day}`);
+            await VoiceService.playAudio(gmConn, audio, gameId).catch(() => {});
+          }
+        } else {
+          await voteChannel.send(`👑 **女王崩御:** 女王が死亡したため、市民陣営の全員がショック死しました...`);
+          if (mainVcChannel) {
+            const gmConn = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'queen_dead');
+            const audio = await TTSService.generateAudio(MSG.VOICE.QUEEN_DIED, gameId, `qd_${state.day}`);
+            await VoiceService.playAudio(gmConn, audio, gameId).catch(() => {});
+          }
+        }
+      }
+
+      if (execResult.additionalKilledUserIds.length > 0) {
+        for (const kid of execResult.additionalKilledUserIds) {
+          const victimMember = await guild.members.fetch(kid).catch(() => null);
+          const victimName = victimMember?.displayName || '不明なプレイヤー';
+          const currentPlayers = stateManager.getState().players.map(p => p.userId === kid ? { ...p, isAlive: false } : p);
+          stateManager.updateState({
+            players: currentPlayers,
+            eventLogs: [...stateManager.getState().eventLogs, `[処刑連鎖死亡] ${victimName} が死亡した`]
+          });
+        }
+      }
 
       if (mainVcChannel && ghostVc) {
         const gmConnection = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'main');
@@ -1204,7 +1645,13 @@ export class PhaseHandler {
 
     await new Promise(resolve => setTimeout(resolve, 2000));
     
-    const winningTeam = this.checkWinCondition(stateManager.getState());
+    // 単独勝利（棺桶屋、てるてる坊主）または通常陣営勝利判定
+    const currentLatestState = stateManager.getState();
+    const winningTeam = this.checkWinCondition(currentLatestState, {
+      undertakerWin: executedUserId ? (currentLatestState.undertakerHitCount || 0) >= 2 : false,
+      foolWin: executedUserId ? (currentLatestState.players.find(p => p.userId === executedUserId)?.role === 'てるてる坊主') : false
+    });
+
     if (winningTeam) {
       stateManager.updateState({ executedUserId: undefined });
       stateManager.nextPhase('finished');
@@ -1260,6 +1707,39 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
 
     await this.syncLedgerAndMove(guild, gameId, 'night');
     stateManager.updateState({ nightActions: {} });
+
+    // タフガイの夜息絶え処理（前夜に襲撃されて毒を受けたタフガイ）
+    const toughGuyPoisoned = stateManager.getState().toughGuyPoisoned || {};
+    for (const [tgUserId, isPoisoned] of Object.entries(toughGuyPoisoned)) {
+      if (isPoisoned) {
+        const tgPlayer = stateManager.getState().players.find(p => p.userId === tgUserId && p.isAlive);
+        if (tgPlayer) {
+          tgPlayer.isAlive = false;
+          stateManager.getState().eventLogs.push(`[タフガイ死亡] 前日の襲撃の傷により息絶えた (User: ${tgUserId})`);
+        }
+        delete toughGuyPoisoned[tgUserId];
+      }
+    }
+
+    // 生霊の引き継ぎチェック（憑依先が昼に死亡していた場合、役職を引き継ぐ）
+    const spiritData = stateManager.getState().livingSpiritData || {};
+    for (const [spiritId, targetId] of Object.entries(spiritData)) {
+      const spiritPlayer = stateManager.getState().players.find(p => p.userId === spiritId && p.isAlive);
+      const targetPlayer = stateManager.getState().players.find(p => p.userId === targetId);
+      if (spiritPlayer && targetPlayer && !targetPlayer.isAlive && targetPlayer.role && targetPlayer.role !== '生霊') {
+        const inheritedRole = targetPlayer.role;
+        spiritPlayer.role = inheritedRole;
+        stateManager.getState().eventLogs.push(`[生霊引き継ぎ] 憑依先の死亡により【${inheritedRole}】を引き継いだ (User: ${spiritId})`);
+        await this.sendToPersonalChannel(guild, spiritId, MSG.CHAT.DM_LIVING_SPIRIT_INHERITED(inheritedRole));
+      }
+    }
+
+    // 占い師の弟子の覚醒判定（本物の占い師が死亡しているか）
+    const seerPlayer = stateManager.getState().players.find(p => p.role === '占い師');
+    if (seerPlayer && !seerPlayer.isAlive) {
+      stateManager.updateState({ apprenticeDivinerAwakened: true });
+    }
+    stateManager.updateState({ toughGuyPoisoned, players: stateManager.getState().players, eventLogs: stateManager.getState().eventLogs });
 
     const voteChannel = await guild.channels.fetch(state.voteChannelId) as TextChannel;
     const awayButton = new ButtonBuilder().setCustomId('night_away').setLabel('☕ 退席する').setStyle(ButtonStyle.Secondary);
@@ -1429,6 +1909,39 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
       }
     }
 
+    const apprentice = alivePlayers.find((p: Player) => p.role === '未熟な占い師');
+    const isApprenticeLost = apprentice ? stateManager.getState().apprenticeStatus?.[apprentice.userId] : true;
+    if (apprentice && !isApprenticeLost) {
+      const apprenticeVc = await guild.channels.fetch(apprentice.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (apprenticeVc) {
+        playVoiceTask(getWorker(4), apprenticeVc, MSG.VOICE.PROMPT_APPRENTICE_SEER, 'apprentice_prompt');
+      }
+    }
+
+    const reckless = alivePlayers.find((p: Player) => p.role === '無謀な占い師');
+    if (reckless) {
+      const recklessVc = await guild.channels.fetch(reckless.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (recklessVc) {
+        playVoiceTask(getWorker(5), recklessVc, MSG.VOICE.PROMPT_RECKLESS_SEER, 'reckless_prompt');
+      }
+    }
+
+    const foxPossessed = alivePlayers.find((p: Player) => p.role === '狐憑き');
+    if (foxPossessed) {
+      const foxVc = await guild.channels.fetch(foxPossessed.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (foxVc) {
+        playVoiceTask(getWorker(6), foxVc, MSG.VOICE.PROMPT_FOX_POSSESSED, 'fox_prompt');
+      }
+    }
+
+    const undertaker = alivePlayers.find((p: Player) => p.role === '棺桶屋');
+    if (undertaker) {
+      const undertakerVc = await guild.channels.fetch(undertaker.waitVcId).catch(() => null) as VoiceBasedChannel;
+      if (undertakerVc) {
+        playVoiceTask(getWorker(7), undertakerVc, MSG.VOICE.PROMPT_UNDERTAKER, 'undertaker_prompt');
+      }
+    }
+
     const wolfTextCh = await guild.channels.fetch(state.wolfTextChannelId) as TextChannel;
     let nightTargetUnixTime = Math.floor(Date.now() / 1000) + (settings.actionTimeoutMin * 60);
     const nightTimerMsg = await wolfTextCh.send(MSG.CHAT.NIGHT_WOLF_TIMER_START(nightTargetUnixTime));
@@ -1451,14 +1964,21 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     const wolfPromise = (async () => {
       if (aliveWolves.length === 0) return;
       try {
-        const selectMenu = new StringSelectMenuBuilder().setCustomId('w').setPlaceholder('襲撃先を選択');
+        const isDoubleAttack = (stateManager.getState().wolfCubRevenge === true);
+        const maxSelect = isDoubleAttack ? Math.min(2, wolfTargets.length) : 1;
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId('w')
+          .setPlaceholder(isDoubleAttack ? '襲撃先を最大2名選択' : '襲撃先を選択')
+          .setMinValues(1)
+          .setMaxValues(maxSelect);
         for (const target of wolfTargets) {
           const targetM = await guild.members.fetch(target.userId).catch(() => null);
           if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
         }
         
+        const wolfPromptText = isDoubleAttack ? `🐺 **【2回襲撃発動中】**\n今夜は最大2名を襲撃できます！対象を選択してください：` : MSG.CHAT.WOLF_PROMPT;
         const wolfMsg = await wolfTextCh.send({ 
-          content: MSG.CHAT.WOLF_PROMPT, 
+          content: wolfPromptText, 
           components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)] 
         }).catch(() => null);
         
@@ -1473,15 +1993,25 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
           }
           
           const targetId = i.values[0];
+          const secondTargetId = i.values[1];
           const targetName = (await guild.members.fetch(targetId)).displayName;
+          const secondTargetName = secondTargetId ? (await guild.members.fetch(secondTargetId)).displayName : '';
           
           await i.deferUpdate().catch(() => {});
           
           // 最後に選択された襲撃対象を上書き
-          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, wolfTargetId: targetId } });
+          stateManager.updateState({ 
+            nightActions: { 
+              ...stateManager.getState().nightActions, 
+              wolfTargetId: targetId,
+              wolfSecondTargetId: secondTargetId 
+            },
+            wolfCubRevenge: false
+          });
           
           // 人狼チャットへの通知
-          await wolfTextCh.send(MSG.CHAT.WOLF_TARGET_SET(i.user.id, targetName)).catch(() => {});
+          const displayNames = secondTargetName ? `${targetName}、${secondTargetName}` : targetName;
+          await wolfTextCh.send(MSG.CHAT.WOLF_TARGET_SET(i.user.id, displayNames)).catch(() => {});
           
           // 人狼VCへの音声再生
           if (wolfVc) playVoiceTask(getWorker(1), wolfVc, MSG.VOICE.WOLF_TARGET_SET(targetName), 'wolf_res');
@@ -1594,7 +2124,423 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
       } catch (e) {}
     })();
 
-    await Promise.all([wolfPromise, seerPromise, knightPromise]);
+    // 🔰 未熟な占い師のアクション
+    const apprenticePromise = (async () => {
+      if (!apprentice) return;
+      const isLost = stateManager.getState().apprenticeStatus?.[apprentice.userId];
+      if (isLost) {
+        await this.sendToPersonalChannel(guild, apprentice.userId, '⚠️ あなたは過去に予想を外したため、占いの能力を失っています。');
+        return;
+      }
+
+      try {
+        const targets = alivePlayers.filter((p: Player) => p.userId !== apprentice.userId);
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('ap_target').setPlaceholder('占う対象を選択');
+        for (const target of targets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+
+        const predRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('pred_wolf').setLabel('予想: 人狼 🐺').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('pred_villager').setLabel('予想: 村人 🧑').setStyle(ButtonStyle.Primary)
+        );
+
+        const pMsg = await this.sendToPersonalChannel(guild, apprentice.userId, {
+          content: '🔮 **【未熟な占い】** 占う対象を選択し、その人物が「人狼」か「村人」かを予想してください：',
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu), predRow]
+        });
+
+        if (!pMsg) return;
+        let selectedTargetId = '';
+        let selectedPred: 'wolf' | 'villager' = 'villager';
+        let resolved = false;
+
+        const collector = pMsg.createMessageComponentCollector({ time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+
+        collector.on('collect', async (i: any) => {
+          if (i.user.id !== apprentice.userId) return;
+          if (i.isStringSelectMenu()) {
+            selectedTargetId = i.values[0];
+            await i.deferUpdate().catch(() => {});
+          } else if (i.isButton()) {
+            selectedPred = i.customId === 'pred_wolf' ? 'wolf' : 'villager';
+            resolved = true;
+            await i.deferUpdate().catch(() => {});
+            collector.stop();
+          }
+
+          if (selectedTargetId) {
+            stateManager.updateState({
+              nightActions: {
+                ...stateManager.getState().nightActions,
+                apprenticeTargetId: selectedTargetId,
+                apprenticePrediction: selectedPred
+              }
+            });
+          }
+        });
+
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+
+        if (!resolved && !selectedTargetId) {
+          selectedTargetId = targets[Math.floor(Math.random() * targets.length)]?.userId || '';
+          stateManager.updateState({
+            nightActions: {
+              ...stateManager.getState().nightActions,
+              apprenticeTargetId: selectedTargetId,
+              apprenticePrediction: selectedPred
+            }
+          });
+        }
+
+        if (selectedTargetId) {
+          const targetPlayerForAudio = stateManager.getState().players.find((p: Player) => p.userId === selectedTargetId);
+          if (targetPlayerForAudio) {
+            const isWolf = targetPlayerForAudio.role === '人狼';
+            const isCorrect = (selectedPred === (isWolf ? 'wolf' : 'villager'));
+            const apprenticeVc = await guild.channels.fetch(apprentice.waitVcId).catch(() => null) as VoiceBasedChannel;
+            if (apprenticeVc) {
+              playVoiceTask(getWorker(4), apprenticeVc, MSG.VOICE.APPRENTICE_SEER_RESULT(isWolf, isCorrect), 'apprentice_res');
+            }
+          }
+        }
+      } catch (e) {}
+    })();
+
+    // ⚡ 無謀な占い師のアクション
+    const recklessPromise = (async () => {
+      if (!reckless) return;
+      try {
+        const targets = alivePlayers.filter((p: Player) => p.userId !== reckless.userId);
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('reckless_target').setPlaceholder('占う対象を選択');
+        for (const target of targets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+
+        const pMsg = await this.sendToPersonalChannel(guild, reckless.userId, {
+          content: '⚡ **【無謀な占い】** 占う対象を選択してください（※あなたは護衛の恩恵を受けられません）：',
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== reckless.userId) return;
+          const targetId = i.values[0];
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, recklessTargetId: targetId } });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+        });
+
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+
+        let targetIdForAudio = stateManager.getState().nightActions.recklessTargetId;
+        if (!resolved && !targetIdForAudio) {
+          targetIdForAudio = targets[Math.floor(Math.random() * targets.length)]?.userId || '';
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, recklessTargetId: targetIdForAudio } });
+        }
+
+        if (targetIdForAudio) {
+          const targetPlayerForAudio = stateManager.getState().players.find((p: Player) => p.userId === targetIdForAudio);
+          if (targetPlayerForAudio) {
+            const recklessVc = await guild.channels.fetch(reckless.waitVcId).catch(() => null) as VoiceBasedChannel;
+            if (recklessVc) {
+              playVoiceTask(getWorker(5), recklessVc, MSG.VOICE.SEER_RESULT(targetPlayerForAudio.role === '人狼'), 'reckless_res');
+            }
+          }
+        }
+      } catch (e) {}
+    })();
+
+    // 🦊 狐憑きのアクション
+    const foxPossessedPromise = (async () => {
+      if (!foxPossessed) return;
+      try {
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('fox_protect_target').setPlaceholder('加護を与える対象を選択');
+        for (const target of alivePlayers) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+
+        const pMsg = await this.sendToPersonalChannel(guild, foxPossessed.userId, {
+          content: '🎭 **【狐の加護】** 今夜加護を与える対象を選択してください（占いを無効化し、妖狐の呪殺を防ぎます）：',
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== foxPossessed.userId) return;
+          const targetId = i.values[0];
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, foxProtectedTargetId: targetId } });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+
+          const targetMember = await guild.members.fetch(targetId).catch(() => null);
+          const targetName = targetMember?.displayName || '選択した対象';
+          const foxVc = await guild.channels.fetch(foxPossessed.waitVcId).catch(() => null) as VoiceBasedChannel;
+          if (foxVc) {
+            playVoiceTask(getWorker(6), foxVc, MSG.VOICE.FOX_PROTECT_SET(targetName), 'fox_res');
+          }
+        });
+
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+      } catch (e) {}
+    })();
+
+    // ⚰️ 棺桶屋のアクション
+    const undertakerPromise = (async () => {
+      if (!undertaker) return;
+      try {
+        const history = stateManager.getState().undertakerHistory?.[undertaker.userId] || [];
+        let validTargets = alivePlayers.filter(p => !history.includes(p.userId));
+
+        // 全員指定済みなら履歴リセット
+        if (validTargets.length === 0) {
+          validTargets = alivePlayers;
+          stateManager.updateState({
+            undertakerHistory: { ...stateManager.getState().undertakerHistory, [undertaker.userId]: [] }
+          });
+        }
+
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('undertaker_target').setPlaceholder('明日処刑されそうな人を予想');
+        for (const target of validTargets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+
+        const currentHits = stateManager.getState().undertakerHitCount || 0;
+        const pMsg = await this.sendToPersonalChannel(guild, undertaker.userId, {
+          content: `⚰️ **【棺桶屋の処刑予想】** (現在的中: **${currentHits}/2回**)\n明日処刑される人物を予想してください（2回的中で即時単独勝利）：`,
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== undertaker.userId) return;
+          const targetId = i.values[0];
+          const newHist = [...(stateManager.getState().undertakerHistory?.[undertaker.userId] || []), targetId];
+          stateManager.updateState({
+            nightActions: { ...stateManager.getState().nightActions, undertakerTargetId: targetId },
+            undertakerHistory: { ...stateManager.getState().undertakerHistory, [undertaker.userId]: newHist }
+          });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+
+          const targetMember = await guild.members.fetch(targetId).catch(() => null);
+          const targetName = targetMember?.displayName || '選択した対象';
+          const undertakerVc = await guild.channels.fetch(undertaker.waitVcId).catch(() => null) as VoiceBasedChannel;
+          if (undertakerVc) {
+            playVoiceTask(getWorker(7), undertakerVc, MSG.VOICE.UNDERTAKER_TARGET_SET(targetName), 'undertaker_res');
+          }
+        });
+
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+      } catch (e) {}
+    })();
+
+    // 🪤 罠師のアクション
+    const trapper = alivePlayers.find((p: Player) => p.role === '罠師');
+    const trapperPromise = (async () => {
+      if (!trapper) return;
+      try {
+        const targets = alivePlayers.filter(p => p.userId !== trapper.userId);
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('trap_target').setPlaceholder('罠を仕掛ける対象を選択');
+        for (const target of targets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+        const pMsg = await this.sendToPersonalChannel(guild, trapper.userId, {
+          content: MSG.CHAT.DM_TRAPPER_PROMPT,
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== trapper.userId) return;
+          const targetId = i.values[0];
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, trapperTargetId: targetId } });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+          const targetName = (await guild.members.fetch(targetId)).displayName;
+          await this.sendToPersonalChannel(guild, trapper.userId, `✅ **${targetName}** さんに罠を仕掛けました。`);
+        });
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+      } catch (e) {}
+    })();
+
+    // 🩺 カウンセラーのアクション
+    const counselor = alivePlayers.find((p: Player) => p.role === 'カウンセラー');
+    const counselorPromise = (async () => {
+      if (!counselor) return;
+      try {
+        const targets = alivePlayers.filter(p => p.userId !== counselor.userId);
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('counsel_target').setPlaceholder('カウンセリング対象を選択');
+        for (const target of targets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+        const pMsg = await this.sendToPersonalChannel(guild, counselor.userId, {
+          content: MSG.CHAT.DM_COUNSELOR_PROMPT,
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== counselor.userId) return;
+          const targetId = i.values[0];
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, counselorTargetId: targetId } });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+          const targetName = (await guild.members.fetch(targetId)).displayName;
+          await this.sendToPersonalChannel(guild, counselor.userId, `✅ **${targetName}** さんにカウンセリングを行います。`);
+        });
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+      } catch (e) {}
+    })();
+
+    // 🕵️ スパイのアクション
+    const spy = alivePlayers.find((p: Player) => p.role === 'スパイ');
+    const spyPromise = (async () => {
+      if (!spy) return;
+      try {
+        const targets = alivePlayers.filter(p => p.userId !== spy.userId);
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('spy_target').setPlaceholder('能力を妨害する対象を選択');
+        for (const target of targets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+        const pMsg = await this.sendToPersonalChannel(guild, spy.userId, {
+          content: MSG.CHAT.DM_SPY_PROMPT,
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== spy.userId) return;
+          const targetId = i.values[0];
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, spyTargetId: targetId } });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+          const targetName = (await guild.members.fetch(targetId)).displayName;
+          await this.sendToPersonalChannel(guild, spy.userId, `✅ **${targetName}** さんの能力妨害を指定しました。`);
+        });
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+      } catch (e) {}
+    })();
+
+    // 🏹 ハンターのアクション（夜の事前道連れ指定）
+    const hunter = alivePlayers.find((p: Player) => p.role === 'ハンター');
+    const hunterPromise = (async () => {
+      if (!hunter) return;
+      try {
+        const targets = alivePlayers.filter(p => p.userId !== hunter.userId);
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('hunter_target').setPlaceholder('道連れにする対象を選択');
+        for (const target of targets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+        const pMsg = await this.sendToPersonalChannel(guild, hunter.userId, {
+          content: MSG.CHAT.DM_HUNTER_PROMPT,
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== hunter.userId) return;
+          const targetId = i.values[0];
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, hunterRevengeTargetId: targetId } });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+          const targetName = (await guild.members.fetch(targetId)).displayName;
+          await this.sendToPersonalChannel(guild, hunter.userId, `✅ 万一の道連れ先として **${targetName}** さんを指定しました。`);
+        });
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+      } catch (e) {}
+    })();
+
+    // 🔮 覚醒した占い師の弟子の占いアクション
+    const apprenticeDiviner = alivePlayers.find((p: Player) => p.role === '占い師の弟子');
+    const apprenticeDivinerPromise = (async () => {
+      if (!apprenticeDiviner || !stateManager.getState().apprenticeDivinerAwakened) return;
+      try {
+        const targets = alivePlayers.filter(p => p.userId !== apprenticeDiviner.userId);
+        const selectMenu = new StringSelectMenuBuilder().setCustomId('ad_target').setPlaceholder('占う対象を選択');
+        for (const target of targets) {
+          const targetM = await guild.members.fetch(target.userId).catch(() => null);
+          if (targetM) selectMenu.addOptions({ label: targetM.displayName, value: target.userId });
+        }
+        const pMsg = await this.sendToPersonalChannel(guild, apprenticeDiviner.userId, {
+          content: '🔮 **【覚醒・弟子の占い】** 師匠の遺志を継ぎ、占う対象を1名選択してください：',
+          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)]
+        });
+        if (!pMsg) return;
+        let resolved = false;
+        const collector = pMsg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: settings.actionTimeoutMin * 60000 + nightBonusMs });
+        collector.on('collect', async (i: StringSelectMenuInteraction) => {
+          if (i.user.id !== apprenticeDiviner.userId) return;
+          const targetId = i.values[0];
+          stateManager.updateState({ nightActions: { ...stateManager.getState().nightActions, seerTargetId: targetId } });
+          resolved = true;
+          await i.deferUpdate().catch(() => {});
+          collector.stop();
+        });
+        await this.waitWithPauseAndCondition(settings.actionTimeoutMin * 60000 + nightBonusMs, () => resolved);
+        collector.stop();
+        await pMsg.delete().catch(() => {});
+      } catch (e) {}
+    })();
+
+    await Promise.all([
+      wolfPromise, 
+      seerPromise, 
+      knightPromise, 
+      apprenticePromise, 
+      recklessPromise, 
+      foxPossessedPromise, 
+      undertakerPromise,
+      trapperPromise,
+      counselorPromise,
+      spyPromise,
+      hunterPromise,
+      apprenticeDivinerPromise
+    ]);
 
     if ((StateManager.getInstance().getState().awayPlayerIds || []).length > 0) {
         await this.waitWithPauseAndCondition(9999999 * 1000, () => (StateManager.getInstance().getState().awayPlayerIds || []).length === 0);
@@ -1638,37 +2584,129 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
     await actionQueue.waitForEmpty();
     await new Promise(resolve => setTimeout(resolve, 1500)); 
 
-    const finalWolfTargetId = stateManager.getState().nightActions.wolfTargetId;
-    let killedUserId: string | null = null;
-    
-    if (finalWolfTargetId && finalWolfTargetId !== stateManager.getState().nightActions.knightTargetId) {
-      killedUserId = finalWolfTargetId;
-      const killedName = (await guild.members.fetch(killedUserId)).displayName;
-      const updatedPlayers = stateManager.getState().players.map((p: Player) => p.userId === killedUserId ? { ...p, isAlive: false } : p);
+    // ==========================================
+    // 🌙 ルール解決エンジンによる夜のアクション突合
+    // ==========================================
+    const nightResolution = NightActionResolver.resolve(
+      stateManager.getState().players,
+      stateManager.getState().nightActions,
+      stateManager.getState().apprenticeStatus || {},
+      {
+        loversUserIds: stateManager.getState().loversUserIds,
+        femmeFataleData: stateManager.getState().femmeFataleData,
+        livingSpiritData: stateManager.getState().livingSpiritData,
+        queenUserId: stateManager.getState().queenUserId,
+        apprenticeDivinerAwakened: stateManager.getState().apprenticeDivinerAwakened
+      }
+    );
+
+    // スパイ妨害通知
+    if (nightResolution.spyBlockedUserId) {
+      await this.sendToPersonalChannel(guild, nightResolution.spyBlockedUserId, MSG.CHAT.DM_SPY_BLOCKED);
+    }
+
+    // カウンセラー更生通知
+    if (nightResolution.counselorReformedUserId && counselor) {
+      await this.sendToPersonalChannel(guild, counselor.userId, MSG.CHAT.DM_COUNSELOR_REFORMED);
+      await this.sendToPersonalChannel(guild, nightResolution.counselorReformedUserId, MSG.CHAT.DM_COUNSELOR_TARGET_REFORMED);
+    }
+
+    // タフガイ毒通知
+    if (nightResolution.toughGuyPoisonedUserIds && nightResolution.toughGuyPoisonedUserIds.length > 0) {
+      const currentPoisoned = stateManager.getState().toughGuyPoisoned || {};
+      for (const tgId of nightResolution.toughGuyPoisonedUserIds) {
+        currentPoisoned[tgId] = true;
+        await this.sendToPersonalChannel(guild, tgId, MSG.CHAT.DM_TOUGH_GUY_ATTACKED);
+      }
+      stateManager.updateState({ toughGuyPoisoned: currentPoisoned });
+    }
+
+    // 狙われる市民感染通知
+    if (nightResolution.targetedCivilianInfectedUserId) {
+      await this.sendToPersonalChannel(guild, nightResolution.targetedCivilianInfectedUserId, MSG.CHAT.DM_TARGETED_CIVILIAN_INFECTED);
+    }
+
+    // 占い師たちへの結果送信
+    for (const sr of nightResolution.seerResults) {
+      const targetM = await guild.members.fetch(sr.targetUserId).catch(() => null);
+      const targetName = targetM?.displayName || '不明なプレイヤー';
+
+      let resultText = '';
+      if (sr.result === 'blocked') {
+        resultText = `🔮 **占い結果:** ${targetName} の判定結果は **【 ×（判定不能） 】** でした。`;
+      } else {
+        const isWolfStr = sr.result === 'wolf' ? '人狼 🐺' : '村人（人狼ではない） 🧑';
+        resultText = `🔮 **占い結果:** ${targetName} は **【 ${isWolfStr} 】** でした。`;
+      }
+
+      if (sr.isApprentice) {
+        if (sr.predictionCorrect) {
+          resultText += `\n🎉 **予想的中！** 翌夜も引き続き占うことができます。`;
+        } else {
+          resultText += `\n❌ **予想が外れました！** 翌夜から占いの能力を失います。`;
+          stateManager.updateState({
+            apprenticeStatus: { ...stateManager.getState().apprenticeStatus, [sr.seerUserId]: true }
+          });
+        }
+      }
+
+      await this.sendToPersonalChannel(guild, sr.seerUserId, resultText);
+    }
+
+    // 狐憑きへの妖狐守護フィードバック
+    if (nightResolution.foxProtectedSuccess && nightResolution.foxPossessedUserId) {
+      await this.sendToPersonalChannel(guild, nightResolution.foxPossessedUserId, '👍 **妖狐の守護に成功しました！**（あなたの加護によって妖狐が守られました）');
+    }
+
+    // 死亡者の適用
+    const killedUserIds = nightResolution.killedUserIds;
+    if (killedUserIds.length > 0) {
+      const updatedPlayers = stateManager.getState().players.map((p: Player) => 
+        killedUserIds.includes(p.userId) ? { ...p, isAlive: false } : p
+      );
       
-      state.eventLogs.push(`[第${state.day}日 夜] ${killedName} が人狼に襲撃された`);
+      for (const kid of killedUserIds) {
+        const km = await guild.members.fetch(kid).catch(() => null);
+        state.eventLogs.push(`[第${state.day}日 夜] ${km?.displayName || kid} が無惨な姿で発見された`);
+      }
       stateManager.updateState({ players: updatedPlayers, eventLogs: state.eventLogs });
     }
 
     stateManager.updateState({ day: state.day + 1, executedUserId: undefined });
     const winningTeam = this.checkWinCondition(stateManager.getState());
 
+    // 朝のアナウンス文の生成（複数人死亡対応）
+    let morningText = '';
+    if (killedUserIds.length === 0) {
+      morningText = MSG.VOICE.MORNING_PEACE;
+    } else {
+      const killedNames = (await Promise.all(killedUserIds.map(async id => {
+        const m = await guild.members.fetch(id).catch(() => null);
+        return m?.displayName || '不明なプレイヤー';
+      }))).join('さんと、');
+      morningText = `おはようございます。昨晩の犠牲者は・・・${killedNames}さんでした。`;
+    }
+
+    // パン屋のアナウンスチェック
+    const aliveBaker = stateManager.getState().players.some(p => p.isAlive && p.role === 'パン屋');
+    const hasBakerInVillage = stateManager.getState().players.some(p => p.role === 'パン屋');
+    if (hasBakerInVillage) {
+      if (aliveBaker) {
+        morningText += ' また、今朝もパン屋がおいしいパンを焼いてくれました。';
+      } else {
+        morningText += ' しかし、今朝はパン屋からパンが届きませんでした。';
+      }
+    }
+
     if (winningTeam) {
       stateManager.nextPhase('finished');
-      const morningText = killedUserId 
-        ? MSG.VOICE.MORNING_KILLED((await guild.members.fetch(killedUserId)).displayName)
-        : MSG.VOICE.MORNING_PEACE;
       await this.finishGame(gmClient, assistantClient, gameId, winningTeam, 'bite', morningText);
     } else {
-      // 🚨 修正：朝のGMアナウンスまでは、生存者および今夜の犠牲者(killedUserId)をメインVC(mainVcId)に集め、すでに死亡している人だけを霊界VC(ghostVcId)へ送る
-      await this.syncLedgerAndMove(guild, gameId, 'day', killedUserId);
+      // 🚨 修正：朝のGMアナウンスまでは、生存者および今夜の犠牲者(killedUserIds)をメインVC(mainVcId)に集め、すでに死亡している人だけを霊界VC(ghostVcId)へ送る
+      await this.syncLedgerAndMove(guild, gameId, 'day', killedUserIds[0]);
       
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      const morningText = killedUserId 
-        ? MSG.VOICE.MORNING_KILLED((await guild.members.fetch(killedUserId)).displayName)
-        : MSG.VOICE.MORNING_PEACE;
-      
       if (mainVcChannel && ghostVc) {
         const gmConnection = await VoiceService.connectWithClient(gmClient, mainVcChannel, gameId, 'main');
         await new Promise(r => setTimeout(r, 1000));
@@ -1679,13 +2717,13 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
       const voteChannel = await guild.channels.fetch(state.voteChannelId) as TextChannel;
       await voteChannel.send(MSG.CHAT.MORNING_ANNOUNCE(stateManager.getState().day, morningText));
 
-      // 🚨 修正：朝のGMアナウンスが完了した後に、今夜の犠牲者を霊界VC(ghostVcId)へ移動する
+      // 🚨 朝のアナウンス完了後、犠牲者を霊界VCへ移動
       await this.syncLedgerAndMove(guild, gameId, 'day');
 
-      // 🚨 修正：今夜の犠牲者を霊界VCに移動した後に、ミュート解除を行う
-      if (killedUserId) {
+      // 犠牲者のミュート解除
+      for (const kid of killedUserIds) {
         try { 
-          const m = await guild.members.fetch(killedUserId);
+          const m = await guild.members.fetch(kid);
           if (m.voice.channelId) await m.voice.setMute(false); 
         } catch (e) {}
       }
@@ -1739,62 +2777,86 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
       const assistantConnection = await VoiceService.connectWithClient(assistantClient, ghostVc, gameId, 'ghost');
       const broadcastConns = [gmConnection, assistantConnection];
 
-      if (reason === 'execution') {
-          const text = winningTeam === '村人陣営' ? MSG.VOICE.WIN_EXECUTION_VILLAGER : MSG.VOICE.WIN_EXECUTION_WOLF;
-          const winAudio = await TTSService.generateAudio(text, gameId, 'win_exec');
-          await VoiceService.broadcastAudio(broadcastConns, winAudio, gameId);
-      } else if (reason === 'bite') {
-          if (morningText) {
-              const morningAudio = await TTSService.generateAudio(morningText, gameId, 'morning_kill');
-              await VoiceService.broadcastAudio(broadcastConns, morningAudio, gameId);
-          }
-          const winAudio = await TTSService.generateAudio(MSG.VOICE.WIN_BITE_WOLF, gameId, 'win_bite');
-          await VoiceService.broadcastAudio(broadcastConns, winAudio, gameId);
+      let winVoiceText = MSG.VOICE.WIN_EXECUTION_VILLAGER;
+      if (winningTeam === '村人陣営') {
+        winVoiceText = (reason === 'execution') ? MSG.VOICE.WIN_EXECUTION_VILLAGER : '人狼がいなくなったため、村人陣営の勝利です！';
+      } else if (winningTeam === '人狼陣営') {
+        winVoiceText = (reason === 'execution') ? MSG.VOICE.WIN_EXECUTION_WOLF : MSG.VOICE.WIN_BITE_WOLF;
+      } else if (winningTeam === '恋人陣営') {
+        winVoiceText = MSG.VOICE.WIN_LOVERS;
+      } else if (winningTeam === '一匹狼') {
+        winVoiceText = MSG.VOICE.WIN_LONE_WOLF;
+      } else if (winningTeam === '神様') {
+        winVoiceText = MSG.VOICE.WIN_GOD;
+      } else if (winningTeam === 'てるてる坊主') {
+        winVoiceText = MSG.VOICE.WIN_FOOL;
+      } else if (winningTeam === '棺桶屋') {
+        winVoiceText = MSG.VOICE.WIN_UNDERTAKER;
+      } else if (winningTeam === '妖狐陣営') {
+        winVoiceText = MSG.VOICE.WIN_FOX;
       }
+
+      if (reason === 'bite' && morningText) {
+        const morningAudio = await TTSService.generateAudio(morningText, gameId, 'morning_kill');
+        await VoiceService.broadcastAudio(broadcastConns, morningAudio, gameId);
+      }
+      const winAudio = await TTSService.generateAudio(winVoiceText, gameId, `win_${reason}`);
+      await VoiceService.broadcastAudio(broadcastConns, winAudio, gameId);
       
       await voteChannel.send(resultText);
 
-      const nextAudio = await TTSService.generateAudio(MSG.VOICE.MVP_NEXT, gameId, 'win_announce_next');
-      await VoiceService.broadcastAudio(broadcastConns, nextAudio, gameId);
-      await voteChannel.send(MSG.CHAT.MVP_ANALYZING);
-      
-      try {
-        const playerNameMap: Record<string, string> = {};
-        for (const p of state.players) {
-          playerNameMap[p.userId] = (guild.members.cache.get(p.userId) || await guild.members.fetch(p.userId).catch(() => null))?.displayName || '不明なプレイヤー';
-        }
+      const sysSettings = SettingsManager.getInstance().getSystem();
+      const reg = state.regulationId ? RegulationManager.getInstance().get(state.regulationId) : undefined;
+      const isAIRecordingEnabled = reg?.system?.enableAIRecording !== undefined
+        ? reg.system.enableAIRecording
+        : (sysSettings.enableAIRecording !== false);
 
-        // 🚨 戻り値から wasForcedFallback を受け取る
-        const mvpData = await AIService.analyzeMVP(gameId, state.speechLogs, playerNameMap, state.eventLogs);
+      if (isAIRecordingEnabled) {
+        const nextAudio = await TTSService.generateAudio(MSG.VOICE.MVP_NEXT, gameId, 'win_announce_next');
+        await VoiceService.broadcastAudio(broadcastConns, nextAudio, gameId);
+        await voteChannel.send(MSG.CHAT.MVP_ANALYZING);
         
-        const sysSettings = SettingsManager.getInstance().getSystem();
-        let resultText = '';
-        let voiceText = '';
+        try {
+          const playerNameMap: Record<string, string> = {};
+          for (const p of state.players) {
+            playerNameMap[p.userId] = (guild.members.cache.get(p.userId) || await guild.members.fetch(p.userId).catch(() => null))?.displayName || '不明なプレイヤー';
+          }
+          const regulationSummary = RegulationManager.getInstance().formatSummary(reg, state.players);
 
-        if (sysSettings.mvpMode === 'compare') {
-            resultText = MSG.CHAT.MVP_RESULT_DOUBLE(mvpData.discussionMvpName || '不明', mvpData.contributionMvpName || '不明', mvpData.text);
-            voiceText = MSG.VOICE.MVP_ANNOUNCE_DOUBLE(mvpData.discussionMvpName || '不明', mvpData.contributionMvpName || '不明');
-        } else {
-            const title = sysSettings.mvpMode === 'discussion' ? '議論MVP' : '勝利貢献MVP';
-            resultText = MSG.CHAT.MVP_RESULT_SINGLE(title, mvpData.mvpName, mvpData.text);
-            voiceText = MSG.VOICE.MVP_ANNOUNCE_SINGLE(title, mvpData.mvpName);
+          // 🚨 戻り値から wasForcedFallback を受け取る
+          const mvpData = await AIService.analyzeMVP(gameId, state.speechLogs, playerNameMap, state.eventLogs, regulationSummary);
+          
+          let resultText = '';
+          let voiceText = '';
+
+          if (sysSettings.mvpMode === 'compare') {
+              resultText = MSG.CHAT.MVP_RESULT_DOUBLE(mvpData.discussionMvpName || '不明', mvpData.contributionMvpName || '不明', mvpData.text);
+              voiceText = MSG.VOICE.MVP_ANNOUNCE_DOUBLE(mvpData.discussionMvpName || '不明', mvpData.contributionMvpName || '不明');
+          } else {
+              const title = sysSettings.mvpMode === 'discussion' ? '議論MVP' : '勝利貢献MVP';
+              resultText = MSG.CHAT.MVP_RESULT_SINGLE(title, mvpData.mvpName, mvpData.text);
+              voiceText = MSG.VOICE.MVP_ANNOUNCE_SINGLE(title, mvpData.mvpName);
+          }
+
+          // 🚨 インテリジェント・フォールバックが発生した場合、システム通知を挿入し、全体設定を上書きする
+          if (mvpData.wasForcedFallback) {
+              const warningMsg = `⚠️ **【システム通知】**\n設定されていたAIモデルで制限または権限エラーを検知したため、安全な無料枠モデル（自動フォールバック）へ切り替えて解析を実行しました。\n次回以降の遅延を防ぐため、サーバーの全体設定を **「自動フォールバック」** に自動更新しました。\n\n---\n\n`;
+              resultText = warningMsg + resultText;
+              SettingsManager.getInstance().updateSystem({ aiModel: 'fallback' });
+              Logger.warn('PhaseHandler', `🔧 強制ダウングレードを検知したため、システム設定を 'fallback' に自動更新しました。`, gameId);
+          }
+
+          const chunks = this.splitMessage(resultText);
+          for (const chunk of chunks) await voteChannel.send(chunk);
+          
+          const mvpAudio = await TTSService.generateAudio(voiceText, gameId, 'mvp_announce');
+          await VoiceService.broadcastAudio(broadcastConns, mvpAudio, gameId);
+        } catch (error) {
+          await voteChannel.send(MSG.CHAT.MVP_ERROR(gameId));
         }
-
-        // 🚨 インテリジェント・フォールバックが発生した場合、システム通知を挿入し、全体設定を上書きする
-        if (mvpData.wasForcedFallback) {
-            const warningMsg = `⚠️ **【システム通知】**\n設定されていたAIモデルで制限または権限エラーを検知したため、安全な無料枠モデル（自動フォールバック）へ切り替えて解析を実行しました。\n次回以降の遅延を防ぐため、サーバーの全体設定を **「自動フォールバック」** に自動更新しました。\n\n---\n\n`;
-            resultText = warningMsg + resultText;
-            SettingsManager.getInstance().updateSystem({ aiModel: 'fallback' });
-            Logger.warn('PhaseHandler', `🔧 強制ダウングレードを検知したため、システム設定を 'fallback' に自動更新しました。`, gameId);
-        }
-
-        const chunks = this.splitMessage(resultText);
-        for (const chunk of chunks) await voteChannel.send(chunk);
-        
-        const mvpAudio = await TTSService.generateAudio(voiceText, gameId, 'mvp_announce');
-        await VoiceService.broadcastAudio(broadcastConns, mvpAudio, gameId);
-      } catch (error) {
-        await voteChannel.send(MSG.CHAT.MVP_ERROR(gameId));
+      } else {
+        Logger.info('PhaseHandler', '🎙️ AI総評・音声解析は設定により無効化されているためスキップします', gameId);
+        await voteChannel.send('ℹ️ **【AI総評】** この村はAI総評・録音機能がOFFに設定されているため、講評をスキップします。感想戦をお楽しみください！');
       }
     }
 
@@ -1873,34 +2935,50 @@ public static async startNightPhase(gmClient: Client, assistantClient: Client, g
   public static async resumeGame(gmClient: Client, assistantClient: Client, gameId: string): Promise<void> {
     const stateManager = StateManager.getInstance();
     const state = stateManager.getState();
-    const guild = await gmClient.guilds.fetch(state.serverId);
-    
-    VoiceService.disconnectAll(gameId);
-    
-    const voteChannel = await guild.channels.fetch(state.voteChannelId) as TextChannel;
-    if (voteChannel) await voteChannel.send(MSG.CHAT.SYS_RECOVER(state.phase));
+    try {
+      const guild = await gmClient.guilds.fetch(state.serverId).catch(() => null);
+      if (!guild) {
+        Logger.warn('PhaseHandler', `⚠️ ギルド (${state.serverId}) が見つからないため、ゲーム [${gameId}] を終了としてマークします`, gameId);
+        stateManager.updateState({ phase: 'finished' });
+        return;
+      }
+      
+      VoiceService.disconnectAll(gameId);
+      
+      const voteChannel = await guild.channels.fetch(state.voteChannelId).catch(() => null) as TextChannel | null;
+      if (!voteChannel) {
+        Logger.warn('PhaseHandler', `⚠️ 投票チャンネル (${state.voteChannelId}) が存在しないため、ゲーム [${gameId}] を終了としてマークします`, gameId);
+        stateManager.updateState({ phase: 'finished' });
+        return;
+      }
+      
+      await voteChannel.send(MSG.CHAT.SYS_RECOVER(state.phase)).catch(() => {});
 
-    switch (state.phase) {
-      case 'setup': await this.startRoleDistribution(gmClient, assistantClient, gameId); break;
-      case 'day_discussion': await this.startDayDiscussion(gmClient, assistantClient, gameId); break;
-      case 'voting': await this.startVotingPhase(gmClient, assistantClient, gameId); break;
-      case 'runoff_voting':
-        if (state.runoffTargets && state.runoffTargets.length > 0) {
-          await this.handleRunoffVotingPhase(gmClient, assistantClient, gameId, state.runoffTargets);
-        } else {
-          Logger.warn('PhaseHandler', '⚠️ 決選投票対象が見つからないため、投票フェーズから再開します', gameId);
-          await this.startVotingPhase(gmClient, assistantClient, gameId);
-        }
-        break;
-      case 'execution': 
-        if (state.executedUserId !== undefined) {
-          await this.handleExecutionPhase(gmClient, assistantClient, gameId, state.executedUserId);
-        } else {
-          Logger.warn('PhaseHandler', '⚠️ 処刑対象データが見つからないため、投票フェーズから再開します', gameId);
-          await this.startVotingPhase(gmClient, assistantClient, gameId);
-        }
-        break;
-      case 'night': await this.startNightPhase(gmClient, assistantClient, gameId); break;
+      switch (state.phase) {
+        case 'setup': await this.startRoleDistribution(gmClient, assistantClient, gameId); break;
+        case 'day_discussion': await this.startDayDiscussion(gmClient, assistantClient, gameId); break;
+        case 'voting': await this.startVotingPhase(gmClient, assistantClient, gameId); break;
+        case 'runoff_voting':
+          if (state.runoffTargets && state.runoffTargets.length > 0) {
+            await this.handleRunoffVotingPhase(gmClient, assistantClient, gameId, state.runoffTargets);
+          } else {
+            Logger.warn('PhaseHandler', '⚠️ 決選投票対象が見つからないため、投票フェーズから再開します', gameId);
+            await this.startVotingPhase(gmClient, assistantClient, gameId);
+          }
+          break;
+        case 'execution': 
+          if (state.executedUserId !== undefined) {
+            await this.handleExecutionPhase(gmClient, assistantClient, gameId, state.executedUserId);
+          } else {
+            Logger.warn('PhaseHandler', '⚠️ 処刑対象データが見つからないため、投票フェーズから再開します', gameId);
+            await this.startVotingPhase(gmClient, assistantClient, gameId);
+          }
+          break;
+        case 'night': await this.startNightPhase(gmClient, assistantClient, gameId); break;
+      }
+    } catch (err: any) {
+      Logger.error('PhaseHandler', `❌ ゲーム [${gameId}] の復帰中に予期せぬエラーが発生しました: ${err.message}`, gameId);
+      throw err;
     }
   }
 }

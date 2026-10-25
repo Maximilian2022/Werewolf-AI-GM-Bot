@@ -18,6 +18,8 @@ import { VoiceService } from '../services/VoiceService.js';
 import { VCWatcher } from '../managers/VCWatcher.js';
 import { AIService } from '../services/AIService.js';
 import { SettingsManager, GameSettings } from '../managers/SettingsManager.js';
+import { RegulationManager } from '../regulations/RegulationManager.js';
+import { TunnelManager } from '../managers/TunnelManager.js';
 import { Logger } from '../utils/logger.js';
 import { GameState } from '../types.js';
 import { createAudioPlayer, createAudioResource, StreamType } from '@discordjs/voice';
@@ -237,8 +239,35 @@ export class CommandHandler {
       }
     }
 
-    if (participants.length !== 11 && participants.length !== 13) {
-      await interaction.editReply(`❌ エラー: プレイヤーの参加人数が ${participants.length} 人です（観戦者除く）。11人または13人にしてください。`);
+    // レギュレーションの解決
+    const specifiedReg = interaction.options.getString('レギュレーション');
+    const specifiedAnnounce = interaction.options.getBoolean('レギュレーション読み上げ');
+    const regMgr = RegulationManager.getInstance();
+    let regulation = specifiedReg ? (regMgr.getByName(specifiedReg) || regMgr.get(specifiedReg)) : null;
+
+    if (!regulation) {
+      // 指定がない場合は参加人数に一致するレギュレーション（プリセット優先）を自動選択
+      const availableRegs = regMgr.getByPlayerCount(participants.length);
+      regulation = availableRegs.find(r => r.isPreset) || availableRegs[0] || null;
+    }
+
+    if (!regulation) {
+      await interaction.editReply(`❌ エラー: プレイヤーの参加人数が ${participants.length} 人です（観戦者除く）。\nこの人数に対応するレギュレーションが見つかりません。WebUIまたは \`/レギュレーション\` で構成を作成・確認してください。`);
+      return;
+    }
+
+    if (specifiedAnnounce !== null) {
+      regulation = {
+        ...regulation,
+        system: {
+          ...regulation.system,
+          enableRegulationAnnouncement: specifiedAnnounce
+        }
+      };
+    }
+
+    if (regulation.playerCount !== participants.length) {
+      await interaction.editReply(`❌ エラー: 選択されたレギュレーション「${regulation.name}」は ${regulation.playerCount} 人用ですが、現在の参加人数は ${participants.length} 人です。`);
       return;
     }
 
@@ -248,7 +277,7 @@ export class CommandHandler {
       return;
     }
 
-    try { await interaction.editReply(`隔離環境を構築します (GameID: ${gameId})`); } catch {}
+    try { await interaction.editReply(`隔離環境を構築します (GameID: ${gameId}) [${regulation.name}]`); } catch {}
 
     try {
       await DiscordService.cleanupAllLegacyResources(guild);
@@ -258,8 +287,9 @@ export class CommandHandler {
         gameId,
         serverId: guild.id,
         phase: 'setup',
+        regulationId: regulation.id,
         players: participants.map(p => ({ userId: p.id, role: null, isAlive: true, waitVcId: '', personalRoleId: '', personalTextChannelId: '' })),
-        eventLogs: ['[セットアップ開始] 環境リソース構築準備中']
+        eventLogs: [`[セットアップ開始] レギュレーション: ${regulation.name} (${regulation.playerCount}人)`]
       };
       // この時点で data/games/[gameId].json が非同期で即座に生成されます
       StateManager.getInstance().initState(preState);
@@ -287,6 +317,10 @@ export class CommandHandler {
         waitVcId: env.mainVcId, mainVcId: env.mainVcId, wolfVcId: env.wolfVcId, ghostVcId: env.ghostVcId, 
         voteChannelId: env.voteChannelId, wolfTextChannelId: env.wolfTextChannelId,
         isDebug, phase: 'setup', day: 0,
+        regulationId: regulation.id,
+        undertakerHitCount: 0,
+        undertakerHistory: {},
+        apprenticeStatus: {},
         players: participants.map((p: any) => {
           const pEnv = env.playerEnvs.find((e: any) => e.userId === p.id)!;
           return { userId: p.id, role: null, isAlive: true, waitVcId: pEnv.waitVcId, personalRoleId: pEnv.personalRoleId, personalTextChannelId: pEnv.personalTextChannelId };
@@ -300,7 +334,7 @@ export class CommandHandler {
       
       const voteChannel = await guild.channels.fetch(env.voteChannelId) as TextChannel;
       if (voteChannel) {
-        await voteChannel.send(`🐺 **人狼村が開村しました**\n【GameID: \`${gameId}\`】\n※トラブル等で中断・廃村する場合はこのIDを使用してください。`);
+        await voteChannel.send(`🐺 **人狼村が開村しました**\n【GameID: \`${gameId}\`】\n【レギュレーション: **${regulation.name}**】\n※トラブル等で中断・廃村する場合はこのIDを使用してください。`);
         if (spectators.length > 0) {
             await voteChannel.send(`👁️ **観戦モード:** ${spectators.length}名の方は霊界にアクセスできます。`);
         }
@@ -471,7 +505,9 @@ export class CommandHandler {
           }
       }
 
-      const mvpData = await AIService.analyzeMVP(gameId, state.speechLogs, playerNameMap, state.eventLogs || []);
+      const reg = state.regulationId ? RegulationManager.getInstance().get(state.regulationId) : undefined;
+      const regulationSummary = RegulationManager.getInstance().formatSummary(reg, state.players);
+      const mvpData = await AIService.analyzeMVP(gameId, state.speechLogs, playerNameMap, state.eventLogs || [], regulationSummary);
       
       let resultText = '';
       if (sys.mvpMode === 'compare') {
@@ -679,6 +715,52 @@ export class CommandHandler {
         await interaction.reply({ content: errorContent, flags: MessageFlags.Ephemeral });
       }
     }
+  }
+
+  /**
+   * /ダッシュボード コマンドハンドラ
+   */
+  public static async handleDashboard(interaction: ChatInputCommandInteraction) {
+    const tunnelMgr = TunnelManager.getInstance();
+    const publicUrl = tunnelMgr.getPublicUrl();
+
+    if (publicUrl) {
+      const embed = new EmbedBuilder()
+        .setTitle('🌐 WebUI 管理ダッシュボード')
+        .setDescription(`以下のURLからレギュレーション作成やゲームモニターにアクセスできます：\n\n**${publicUrl}**\n\n🔒 **チート防止ロック機能:** ゲーム進行中、参加プレイヤーがアクセスしても情報保護ロック画面が表示され、公平性が保たれます。`)
+        .setColor('#6366f1');
+      await interaction.reply({ embeds: [embed] });
+    } else {
+      const embed = new EmbedBuilder()
+        .setTitle('🌐 WebUI 管理ダッシュボード')
+        .setDescription(`WebUIはローカルポート 3000 (\`http://localhost:3000\`) で稼働しています。\n\n外部公開する場合は、WebUIの「Cloudflare Tunnel & Discord設定」タブから Tunnel Token を入力して起動してください。\n設定後にこのコマンドを実行すると、インターネット越しにアクセスできる公開URLが案内されます。`)
+        .setColor('#f59e0b');
+      await interaction.reply({ embeds: [embed] });
+    }
+  }
+
+  /**
+   * /レギュレーション コマンドハンドラ
+   */
+  public static async handleRegulationList(interaction: ChatInputCommandInteraction) {
+    const regMgr = RegulationManager.getInstance();
+    const regs = regMgr.getAll();
+
+    const embed = new EmbedBuilder()
+      .setTitle('📜 登録済みレギュレーション一覧')
+      .setDescription('WebUIで自由に配役やルールを作成・保存できます。')
+      .setColor('#2b2d31');
+
+    for (const r of regs) {
+      const roleStr = Object.entries(r.roles).map(([id, cnt]) => `${id}×${cnt}`).join(', ');
+      embed.addFields({
+        name: `${r.isPreset ? '⭐ [公式] ' : '🛠️ '}${r.name} (${r.playerCount}人)`,
+        value: `${r.description || '説明なし'}\n配役: \`${roleStr}\``,
+        inline: false
+      });
+    }
+
+    await interaction.reply({ embeds: [embed] });
   }
 
 }

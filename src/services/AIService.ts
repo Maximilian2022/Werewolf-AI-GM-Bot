@@ -17,16 +17,139 @@ export class AIService {
   private static lastJobCompletionTime = 0;
   private static readonly INTERLOCK_DELAY_MS = 70000; // 70秒のTPMクォータ回復インターロック
 
+  // モデル一覧のキャッシュ（有効期間: 10分）
+  private static cachedModels: { label: string, value: string }[] | null = null;
+  private static lastModelFetchTime = 0;
+  private static readonly MODEL_CACHE_TTL_MS = 10 * 60 * 1000;
+
   public static async getAvailableModels(): Promise<{ label: string, value: string }[]> {
-    return [
+    const now = Date.now();
+    if (this.cachedModels && (now - this.lastModelFetchTime < this.MODEL_CACHE_TTL_MS)) {
+      return this.cachedModels;
+    }
+
+    const fallbackList = [
       { label: '🤖 自動フォールバック（無料枠を安全に巡回 / 推奨）', value: 'fallback' },
       { label: '⚡ Gemini Flash (最新版 / 推奨)', value: 'gemini-flash-latest' },
-      { label: '👑 Gemini 3 Pro (高精度 / ※要有料APIキー)', value: 'gemini-3-pro' },
-      { label: '⚡ Gemini 3 Flash (標準 / 無料枠1日20回)', value: 'gemini-3-flash' },
-      { label: '🪶 Gemini 3.1 Flash Lite (軽量 / 無料枠1日500回)', value: 'gemini-3.1-flash-lite' },
-      { label: '📦 Gemini 2.5 Flash (旧世代)', value: 'gemini-2.5-flash' },
-      { label: '📦 Gemini 2.5 Flash Lite (旧世代軽量)', value: 'gemini-2.5-flash-lite' }
+      { label: '👑 Gemini Pro (最新高精度)', value: 'gemini-pro-latest' },
+      { label: '🪶 Gemini Flash Lite (最新軽量)', value: 'gemini-flash-lite-latest' },
+      { label: '⚡ Gemini 2.5 Flash', value: 'gemini-2.5-flash' },
+      { label: '👑 Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
+      { label: '🪶 Gemini 2.5 Flash Lite', value: 'gemini-2.5-flash-lite' }
     ];
+
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        return fallbackList;
+      }
+
+      const listResponse = await this.ai.models.list();
+      const discovered: { label: string, value: string, order: number }[] = [];
+
+      for await (const m of listResponse) {
+        const rawName = m.name || '';
+        const id = rawName.replace(/^models\//, '');
+        const methods: string[] = (m as any).supportedActions || (m as any).supportedGenerationMethods || [];
+
+        // 1. generateContent（テキスト/マルチモーダル生成）をサポートしていないものは除外
+        if (methods.length > 0 && !methods.includes('generateContent')) {
+          continue;
+        }
+
+        // 2. 音声専用、画像生成専用、埋め込み専用、AQA等の無関係モデルを除外
+        const lower = id.toLowerCase();
+        if (
+          lower.includes('embedding') ||
+          lower.includes('tts') ||
+          lower.includes('imagen') ||
+          lower.includes('image-generation') ||
+          lower.includes('veo') ||
+          lower.includes('aqa') ||
+          lower.includes('robotics') ||
+          lower.includes('whisper') ||
+          lower.includes('bison') || // レガシーPaLMモデル
+          lower.includes('gecko')
+        ) {
+          continue;
+        }
+
+        // 3. gemini または gemma のみを対象
+        if (!lower.startsWith('gemini') && !lower.startsWith('gemma')) {
+          continue;
+        }
+
+        // 4. 重複しやすい特定日付スナップショット（例: gemini-1.5-pro-001, gemini-2.0-flash-preview-02-05 等）をフィルタし主要モデルに絞る
+        if (/\d{4}-\d{2}-\d{2}/.test(id) || /-\d{3}$/.test(id)) {
+          continue;
+        }
+
+        // ラベルと優先度を決定
+        let icon = '📦';
+        let order = 50;
+        let displayName = id;
+
+        if (id.includes('flash-latest') || id === 'gemini-flash-latest') {
+          icon = '⚡';
+          order = 1;
+          displayName = 'Gemini Flash (最新版 / 推奨)';
+        } else if (id.includes('pro-latest') || id === 'gemini-pro-latest') {
+          icon = '👑';
+          order = 2;
+          displayName = 'Gemini Pro (最新高精度)';
+        } else if (id.includes('flash-lite-latest') || id === 'gemini-flash-lite-latest') {
+          icon = '🪶';
+          order = 3;
+          displayName = 'Gemini Flash Lite (最新軽量)';
+        } else if (id.includes('flash-lite')) {
+          icon = '🪶';
+          order = 20;
+          displayName = id;
+        } else if (id.includes('flash')) {
+          icon = '⚡';
+          order = 10;
+          displayName = id;
+        } else if (id.includes('pro')) {
+          icon = '👑';
+          order = 15;
+          displayName = id;
+        }
+
+        discovered.push({
+          label: `${icon} ${displayName}`,
+          value: id,
+          order
+        });
+      }
+
+      if (discovered.length === 0) {
+        return fallbackList;
+      }
+
+      // order 順（推奨順）にソート
+      discovered.sort((a, b) => a.order - b.order || a.value.localeCompare(b.value));
+
+      // 重複 value の排除
+      const seen = new Set<string>();
+      const uniqueModels: { label: string, value: string }[] = [
+        { label: '🤖 自動フォールバック（無料枠を安全に巡回 / 推奨）', value: 'fallback' }
+      ];
+      seen.add('fallback');
+
+      for (const m of discovered) {
+        if (!seen.has(m.value)) {
+          seen.add(m.value);
+          uniqueModels.push({ label: m.label, value: m.value });
+        }
+      }
+
+      this.cachedModels = uniqueModels;
+      this.lastModelFetchTime = now;
+      Logger.info('AIService', `🧠 利用可能なAIモデルを動的取得しました (${uniqueModels.length}件)`);
+      return uniqueModels;
+    } catch (error: any) {
+      Logger.warn('AIService', `⚠️ モデル動的取得に失敗したためフォールバックリストを使用します: ${error?.message}`);
+      return fallbackList;
+    }
   }
 
   private static readonly PHASE_MAP: Record<string, string> = {
@@ -34,7 +157,14 @@ export class AIService {
     'execution': '処刑前の遺言', 'night': '夜の行動時', 'finished': 'ゲーム終了後'
   };
 
-  private static async buildPromptParts(mode: 'discussion' | 'contribution', speechLogs: SpeechLog[], playerNameMap: Record<string, string>, eventLogs: string[], tone: string): Promise<any[]> {
+  private static async buildPromptParts(
+    mode: 'discussion' | 'contribution', 
+    speechLogs: SpeechLog[], 
+    playerNameMap: Record<string, string>, 
+    eventLogs: string[], 
+    tone: string,
+    regulationSummary?: string
+  ): Promise<any[]> {
     const isContribution = mode === 'contribution';
     let personaInstruction = '';
     switch (tone) {
@@ -45,7 +175,11 @@ export class AIService {
       default: personaInstruction = `【キャラクター設定】人狼ゲームの高度な専門家であるプロの解説者。\n【出力指示】的確な好プレイへの称賛と、惜しかった点への指摘をバランスよく織り交ぜて実用的な感想戦にしてください。`; break;
     }
 
-    let promptText = `\n${personaInstruction}\n提示された音声データを解析し、MVPを選出してください。\n\n【村のレギュレーション】\n・初日の占い：白通知（お告げ）あり\n・騎士の連続護衛：なし\n・同票の決選投票：あり（それでも同票ならランダム処刑）\n・役職内訳：プレイヤー数に応じて11人または13人の標準的な構成\n\n【評価基準】\n${isContribution ? '「貢献度重視」：実際の役職と勝敗結果に基づき、自陣営を勝利へ導いた最も価値ある立ち回りを評価してください。' : '「議論重視」：実際の勝敗に関わらず、純粋に議論の論理性、説得力、盤面整理能力が最も高かったプレイヤーを評価してください。'}\n\n【出力フォーマット（厳守）】\nプログラムでパースするため、必ず以下のJSON形式（純粋な文字列のみ、Markdownのコードブロックは不要）で出力してください。\n{\n  "mvpName": "MVPに選ばれたプレイヤーの名前（装飾や敬称なしの純粋な名前のみ）",\n  "text": "詳細な講評（全体で2000文字程度。ファイルや音声データというシステム用語は使わないこと）"\n}\n\n【提供データ一覧（時系列）】\n`;
+    const regSection = regulationSummary 
+      ? `【村のレギュレーション】\n${regulationSummary}`
+      : `【村のレギュレーション】\n・初日の占い：白通知（お告げ）あり\n・騎士の連続護衛：なし\n・同票の決選投票：あり（それでも同票ならランダム処刑）\n・役職内訳：標準的な構成`;
+
+    let promptText = `\n${personaInstruction}\n提示された音声データを解析し、MVPを選出してください。\n\n${regSection}\n\n【評価基準】\n${isContribution ? '「貢献度重視」：実際の役職と勝敗結果に基づき、自陣営を勝利へ導いた最も価値ある立ち回りを評価してください。' : '「議論重視」：実際の勝敗に関わらず、純粋に議論の論理性、説得力、盤面整理能力が最も高かったプレイヤーを評価してください。'}\n\n【出力フォーマット（厳守）】\nプログラムでパースするため、必ず以下のJSON形式（純粋な文字列のみ、Markdownのコードブロックは不要）で出力してください。\n{\n  "mvpName": "MVPに選ばれたプレイヤーの名前（装飾や敬称なしの純粋な名前のみ）",\n  "text": "詳細な講評（全体で2000文字程度。ファイルや音声データというシステム用語は使わないこと）"\n}\n\n【提供データ一覧（時系列）】\n`;
 
     speechLogs.forEach((log) => {
       const name = playerNameMap[log.userId] || '不明';
@@ -106,14 +240,15 @@ export class AIService {
     gameId: string,
     speechLogs: SpeechLog[],
     playerNameMap: Record<string, string>,
-    eventLogs: string[]
+    eventLogs: string[],
+    regulationSummary?: string
   ): Promise<{ mvpName: string, text: string, discussionMvpName?: string, contributionMvpName?: string, wasForcedFallback: boolean }> {
     
     // 🚨 呼び出し元にPromiseを返しつつ、実際の処理はキューにスタックして順番を待つ
     return new Promise((resolve, reject) => {
       this.requestQueue.push(async () => {
         try {
-          const result = await this.executeAnalysis(gameId, speechLogs, playerNameMap, eventLogs);
+          const result = await this.executeAnalysis(gameId, speechLogs, playerNameMap, eventLogs, regulationSummary);
           resolve(result);
         } catch (e) {
           reject(e);
@@ -126,7 +261,11 @@ export class AIService {
 
   // 実際の解析実行ロジック（直列化 ＆ インテリジェント・フォールバック内包）
   private static async executeAnalysis(
-    gameId: string, speechLogs: SpeechLog[], playerNameMap: Record<string, string>, eventLogs: string[]
+    gameId: string, 
+    speechLogs: SpeechLog[], 
+    playerNameMap: Record<string, string>, 
+    eventLogs: string[],
+    regulationSummary?: string
   ): Promise<any> {
     const sys = SettingsManager.getInstance().getSystem();
     const mode = sys.mvpMode;
@@ -145,7 +284,7 @@ export class AIService {
         const modelId = currentChain[i];
         try {
           Logger.info('AIService', `🚀 [${targetMode}] モデル [${modelId}] でリクエスト送信中...`, gameId);
-          const contents = await this.buildPromptParts(targetMode, speechLogs, playerNameMap, eventLogs, tone);
+          const contents = await this.buildPromptParts(targetMode, speechLogs, playerNameMap, eventLogs, tone, regulationSummary);
           return await this.ai.models.generateContent({ model: modelId, contents: contents });
         } catch (error: any) {
           lastError = error;

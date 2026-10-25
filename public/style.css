@@ -1,0 +1,1310 @@
+/**
+ * public/style.css
+ * Werewolf GM Bot - Dark Gothic Crimson & Obsidian Werewolf Theme
+ */
+
+:root {
+  --bg-dark: #07070a;
+  --bg-surface: #0e0f14;
+  --bg-card: rgba(18, 14, 20, 0.75);
+  --bg-card-hover: rgba(28, 20, 28, 0.9);
+  --border-glass: rgba(255, 255, 255, 0.07);
+  --border-crimson: rgba(225, 29, 72, 0.28);
+  --border-focus: rgba(225, 29, 72, 0.6);
+
+  --primary: #e11d48;
+  --primary-hover: #be123c;
+  --primary-dark: #881337;
+  --primary-glow: rgba(225, 29, 72, 0.35);
+  --primary-light: #fda4af;
+  --accent-red: #ff2442;
+  
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #06b6d4;
+
+  --text-main: #f8fafc;
+  --text-muted: #a1a1aa;
+  --text-dim: #71717a;
+
+  --team-villager: #38bdf8;
+  --team-werewolf: #ff1e44;
+  --team-fox: #fb923c;
+  --team-third: #c084fc;
+
+  --font-title: 'Cinzel', 'Outfit', serif;
+  --font-sans: 'Outfit', 'Noto Sans JP', -apple-system, sans-serif;
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* カスタムスクロールバー (黒赤スリムデザイン) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(7, 7, 10, 0.7);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(225, 29, 72, 0.35);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(225, 29, 72, 0.65);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+  line-height: 1.6;
+  background-image: 
+    radial-gradient(ellipse at 50% 0%, rgba(225, 29, 72, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 90%, rgba(136, 19, 55, 0.06) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* アンビエントグラデーション背景 (赤黒・ブラッドムーン) */
+.ambient-glow {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(140px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.18;
+}
+.glow-1 {
+  width: 550px;
+  height: 550px;
+  background: radial-gradient(circle, #e11d48 0%, transparent 70%);
+  top: -120px;
+  left: 5%;
+}
+.glow-2 {
+  width: 650px;
+  height: 650px;
+  background: radial-gradient(circle, #881337 0%, transparent 70%);
+  bottom: -150px;
+  right: 5%;
+}
+.glow-bloodmoon {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, #ff2442 0%, transparent 65%);
+  top: 30%;
+  right: 25%;
+  opacity: 0.08;
+}
+
+/* ダーク人狼エンブレム画像スタイル */
+.dark-wolf-emblem {
+  border-radius: 50%;
+  border: 1.5px solid rgba(225, 29, 72, 0.5);
+  box-shadow: 0 0 14px rgba(225, 29, 72, 0.4);
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  display: block;
+  transition: var(--transition);
+}
+.dark-wolf-emblem:hover {
+  transform: scale(1.08);
+  border-color: var(--accent-red);
+  box-shadow: 0 0 20px rgba(255, 36, 66, 0.7);
+}
+.dark-wolf-emblem.medium {
+  width: 80px;
+  height: 80px;
+  border-width: 2px;
+  box-shadow: 0 0 24px rgba(225, 29, 72, 0.5);
+}
+.dark-wolf-emblem.large {
+  width: 110px;
+  height: 110px;
+  border-width: 2.5px;
+  box-shadow: 0 0 35px rgba(225, 29, 72, 0.65), inset 0 0 15px rgba(0, 0, 0, 0.6);
+  animation: emblemPulse 4s ease-in-out infinite;
+}
+
+@keyframes emblemPulse {
+  0%, 100% {
+    box-shadow: 0 0 30px rgba(225, 29, 72, 0.5);
+    border-color: rgba(225, 29, 72, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 45px rgba(255, 36, 66, 0.8);
+    border-color: rgba(255, 36, 66, 0.85);
+  }
+}
+
+/* ゴシック調タイトル */
+.brand-title-cinzel {
+  font-family: var(--font-title);
+  letter-spacing: 0.08em;
+}
+
+/* ナビゲーションバー */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 2rem;
+  background: rgba(7, 7, 10, 0.88);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--border-crimson);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(225, 29, 72, 0.15);
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+.brand-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.brand-text h1 {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: linear-gradient(135deg, #ffffff 40%, #fda4af 80%, #e11d48 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--primary-light);
+  background: rgba(225, 29, 72, 0.14);
+  border: 1px solid rgba(225, 29, 72, 0.25);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 0.4rem;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0.3rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-crimson);
+}
+.nav-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.nav-tab:hover {
+  color: #fff;
+  background: rgba(225, 29, 72, 0.1);
+}
+.nav-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+  box-shadow: 0 2px 14px var(--primary-glow);
+  font-weight: 600;
+}
+
+/* ユーザーエリア */
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.btn-discord {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: var(--transition);
+}
+.btn-discord:hover {
+  background: #4752c4;
+  box-shadow: 0 4px 16px rgba(88, 101, 242, 0.4);
+}
+.user-info-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.3rem 0.8rem 0.3rem 0.4rem;
+  border-radius: 20px;
+  border: 1px solid var(--border-glass);
+}
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* メインコンテンツ */
+.main-content {
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.tab-pane {
+  display: none;
+  animation: fadeIn 0.25s ease forwards;
+}
+.tab-pane.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.section-header h2 {
+  font-size: 1.45rem;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+.section-desc {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* グラスモーフィズムカード */
+/* グラスモーフィズムカード (スモーキーワインダーク) */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-crimson);
+  border-radius: 14px;
+  padding: 1.5rem;
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.45), 0 0 1px rgba(225, 29, 72, 0.2);
+  transition: var(--transition);
+}
+.glass-card:hover {
+  border-color: rgba(225, 29, 72, 0.45);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 15px rgba(225, 29, 72, 0.12);
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-crimson);
+}
+.card-header h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+/* グリッドレイアウト */
+.grid {
+  display: grid;
+  gap: 1.25rem;
+}
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-2-1 { grid-template-columns: 2fr 1fr; }
+.span-2 { grid-column: span 2; }
+.gap-4 { gap: 1.5rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-3 { margin-bottom: 1rem; }
+.mb-4 { margin-bottom: 1.5rem; }
+.mt-3 { margin-top: 1rem; }
+.mt-4 { margin-top: 1.5rem; }
+
+/* フォーム要素 */
+.form-group label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+.form-control, .form-select {
+  width: 100%;
+  background: rgba(8, 8, 12, 0.7);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.9rem;
+  transition: var(--transition);
+  outline: none;
+}
+.form-control:focus, .form-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+  background: rgba(14, 10, 16, 0.85);
+}
+.form-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 0.35rem;
+}
+.badge-required {
+  color: var(--accent-red);
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+
+/* ボタン */
+.btn {
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.6rem 1.15rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.btn-primary {
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+  color: #fff;
+  box-shadow: 0 2px 12px var(--primary-glow);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  box-shadow: 0 4px 18px var(--primary-glow);
+  transform: translateY(-1px);
+}
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  border: 1px solid var(--border-glass);
+}
+.btn-secondary:hover {
+  background: rgba(225, 29, 72, 0.12);
+  border-color: var(--border-crimson);
+  color: #fff;
+}
+.btn-success {
+  background: #10b981;
+  color: #fff;
+}
+.btn-success:hover {
+  background: #059669;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+}
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* 役職カードグリッド */
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+.role-card {
+  background: rgba(16, 13, 20, 0.7);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+.role-card:hover {
+  background: rgba(26, 18, 28, 0.85);
+  border-color: rgba(225, 29, 72, 0.3);
+}
+.role-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+}
+.role-team-villager::before { background: var(--team-villager); }
+.role-team-werewolf::before { background: var(--team-werewolf); }
+.role-team-fox::before { background: var(--team-fox); }
+.role-team-third::before { background: var(--team-third); }
+
+.role-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.role-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.role-team-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.badge-villager { background: rgba(56, 189, 248, 0.15); color: var(--team-villager); }
+.badge-werewolf { background: rgba(244, 63, 94, 0.15); color: var(--team-werewolf); }
+.badge-fox { background: rgba(251, 146, 60, 0.15); color: var(--team-fox); }
+.badge-third { background: rgba(168, 85, 247, 0.15); color: var(--team-third); }
+.badge-lovers { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
+.role-team-lovers { border-left: 3px solid #ec4899; }
+
+.role-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 0.8rem;
+}
+.role-counter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+.btn-counter {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+.btn-counter:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.role-count-val {
+  font-size: 1rem;
+  font-weight: 700;
+  min-width: 24px;
+  text-align: center;
+}
+
+.counter-summary {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.highlight-number {
+  font-size: 1.4rem;
+  color: var(--primary);
+  margin: 0 0.2rem;
+}
+
+/* レギュレーション一覧 */
+.regulation-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.regulation-item {
+  background: rgba(10, 14, 23, 0.5);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.reg-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.reg-item-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.reg-item-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.8rem;
+}
+.reg-roles-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.8rem;
+}
+.reg-role-tag {
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+.reg-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+/* ロック画面 (チート防止・漆黒深紅) */
+.lock-screen-container {
+  padding: 4rem 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.lock-card {
+  max-width: 520px;
+  width: 100%;
+  background: rgba(16, 12, 18, 0.9);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-crimson);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 35px rgba(225, 29, 72, 0.2);
+  border-radius: 16px;
+  padding: 2.8rem 2.2rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.lock-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #e11d48, transparent);
+}
+.lock-icon {
+  font-size: 3.5rem;
+  margin-bottom: 1rem;
+  filter: drop-shadow(0 0 16px rgba(225, 29, 72, 0.5));
+}
+.lock-card h3 {
+  font-family: var(--font-title);
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+.lock-card p {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+  white-space: pre-line;
+}
+
+/* ゲームモニターバー */
+.game-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.status-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+.status-val {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.font-mono { font-family: monospace; }
+.badge-phase {
+  color: #fff;
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.3) 0%, rgba(136, 19, 55, 0.5) 100%);
+  border: 1px solid rgba(225, 29, 72, 0.4);
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* データテーブル */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.data-table th, .data-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-glass);
+}
+.data-table th {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.data-table tr:hover td {
+  background: rgba(225, 29, 72, 0.03);
+}
+.alive-badge {
+  color: #34d399;
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.dead-badge {
+  color: #f43f5e;
+  font-weight: 700;
+  background: rgba(244, 63, 94, 0.12);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+
+/* コンソールログボックス */
+.console-box {
+  background: rgba(4, 4, 7, 0.92);
+  border: 1px solid var(--border-crimson);
+  border-radius: 8px;
+  padding: 1rem;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #e2e8f0;
+  max-height: 380px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+/* 空状態 */
+.empty-state {
+  text-align: center;
+  padding: 4.5rem 1rem;
+}
+.empty-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+.empty-state h3 {
+  font-family: var(--font-title);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  color: #fff;
+}
+.empty-state p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* ステータスピル */
+.status-pill {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+.status-stopped { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+.status-running { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+.status-starting { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+
+/* インストラクションステップ */
+.instruction-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.step-card {
+  display: flex;
+  gap: 1rem;
+  background: rgba(10, 14, 23, 0.4);
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-glass);
+}
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.step-content h4 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.step-content p, .step-content ul {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.step-content ul {
+  margin-top: 0.4rem;
+  padding-left: 1.2rem;
+}
+.highlight-link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+.highlight-link:hover { text-decoration: underline; }
+
+.intent-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.badge-intent {
+  background: rgba(225, 29, 72, 0.15);
+  color: #fda4af;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.live-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--success);
+  letter-spacing: 0.05em;
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+  animation: pulse 1.8s infinite;
+}
+@keyframes pulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+@media (max-width: 900px) {
+  .navbar { flex-direction: column; gap: 0.75rem; padding: 1rem; }
+  .grid-2, .grid-3, .grid-2-1, .reg-builder-layout { grid-template-columns: 1fr; }
+  .span-2 { grid-column: span 1; }
+  .roles-grid { max-height: 400px; }
+  .sticky-summary { position: static; }
+}
+
+/* ============================================== */
+/* 🔐 ログインゲート画面 (漆黒・深紅の人狼ゲート) */
+/* ============================================== */
+.login-gate-container {
+  min-height: 85vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem 1rem;
+}
+.login-gate-card {
+  max-width: 500px;
+  width: 100%;
+  padding: 3.5rem 2.8rem;
+  text-align: center;
+  border-radius: 20px;
+  border: 1px solid var(--border-crimson);
+  background: rgba(14, 11, 16, 0.88);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.7), 0 0 50px rgba(225, 29, 72, 0.22);
+  animation: fadeInGate 0.4s ease-out;
+  position: relative;
+  overflow: hidden;
+}
+.login-gate-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #e11d48, #ff2442, #e11d48, transparent);
+}
+@keyframes fadeInGate {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.login-brand-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+.login-gate-card h2 {
+  font-family: var(--font-title);
+  font-size: 1.85rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.35rem;
+  background: linear-gradient(135deg, #ffffff 40%, #fda4af 80%, #e11d48 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.login-subtitle {
+  font-size: 0.85rem;
+  color: var(--primary-light);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 1.75rem;
+  font-weight: 600;
+}
+.login-gate-desc {
+  margin-bottom: 2rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+.login-gate-desc .text-sm {
+  font-size: 0.82rem;
+  margin-top: 0.5rem;
+}
+.btn-large {
+  padding: 0.95rem 1.8rem;
+  font-size: 1.05rem;
+  border-radius: 12px;
+  width: 100%;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(88, 101, 242, 0.35);
+  transition: all 0.25s ease;
+}
+.btn-large:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(88, 101, 242, 0.5);
+}
+.login-gate-notice {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #fbbf24;
+  line-height: 1.4;
+  text-align: left;
+}
+
+/* ============================================== */
+/* 👑 管理者バッジ */
+/* ============================================== */
+.badge-admin {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+  margin-left: 0.3rem;
+  vertical-align: middle;
+}
+.user-admin-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+/* ============================================== */
+/* 📜 レギュレーションビルダー新レイアウト */
+/* ============================================== */
+.reg-builder-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 1.25rem;
+  align-items: start;
+}
+.flex-1 { flex: 1; }
+.reg-main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+.settings-subheading {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--primary-light);
+  border-bottom: 1px dashed var(--border-glass);
+  padding-bottom: 0.4rem;
+}
+.reg-sidebar-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.sticky-summary {
+  position: sticky;
+  top: 80px;
+  z-index: 10;
+}
+
+/* 1列の役職行リスト */
+.roles-list-single-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 680px;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+.role-row-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 0.65rem 0.9rem;
+  transition: all 0.2s ease;
+}
+.role-row-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.role-row-card.active-assigned {
+  border-color: rgba(225, 29, 72, 0.45);
+  background: rgba(225, 29, 72, 0.08);
+}
+
+.role-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.role-row-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  flex: 1;
+}
+.role-icon-small {
+  font-size: 1.4rem;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.role-title-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.role-name-bold {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #fff;
+}
+.btn-accordion-toggle {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.btn-accordion-toggle:hover {
+  color: var(--primary-light);
+  background: rgba(225, 29, 72, 0.12);
+}
+
+.role-row-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+/* アコーディオン詳細部 (初期非表示) */
+.role-desc-accordion {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  display: none;
+  animation: accordionFade 0.2s ease-out;
+}
+.role-desc-accordion.show {
+  display: block;
+}
+@keyframes accordionFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.role-meta-tags {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+.meta-tag {
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+
+/* ============================================== */
+/* 📊 右端で縦に並ぶ配分サマリー */
+/* ============================================== */
+.distribution-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+.summary-row-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+.summary-row-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.summary-row-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.summary-role-icon {
+  font-size: 1.1rem;
+}
+.summary-role-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #fff;
+}
+.summary-count-badge {
+  font-family: monospace;
+  font-weight: 800;
+  font-size: 0.88rem;
+  background: rgba(225, 29, 72, 0.18);
+  color: #fecdd3;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(225, 29, 72, 0.35);
+}
+.summary-empty-text {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  padding: 1.5rem 0;
+}
+.badge-player-count {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-weight: 800;
+  font-family: monospace;
+  font-size: 0.85rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+/* ============================================== */
+/* 🎥 Zoom 連携 UI スタイル */
+/* ============================================== */
+.zoom-monitor-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+.zoom-participant-list {
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.zoom-participant-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.zoom-chat-box {
+  max-height: 180px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+.zoom-chat-msg {
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  border-left: 3px solid var(--primary-light);
+}
+.zoom-chat-msg.is-command {
+  border-left-color: #34d399;
+  background: rgba(16, 185, 129, 0.05);
+}
+.zoom-chat-sender {
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--primary-light);
+  margin-bottom: 2px;
+}
+.zoom-chat-time {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  float: right;
+}
+.instruction-accordion {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+.instruction-summary {
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0;
+  user-select: none;
+}
+.instruction-summary:hover {
+  color: var(--primary-light);
+}
+.instruction-content {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+  border-top: 1px dashed var(--border-glass);
+  margin-top: 0.5rem;
+}
+.instruction-content h4 {
+  font-size: 0.95rem;
+  color: #fff;
+  margin-bottom: 0.3rem;
+}
+.instruction-content ul, .instruction-content ol {
+  padding-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.instruction-content code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #fbbf24;
+}

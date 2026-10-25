@@ -12,7 +12,11 @@ const guildId = process.env.TEST_GUILD_ID || '1502707892485099623';
 if (!token || !clientId) process.exit(1);
 
 const commands = [
-  new SlashCommandBuilder().setName('開始').setDescription('ゲームを開始').addBooleanOption(o => o.setName('debug').setDescription('デバッグ')).addIntegerOption(o => o.setName('人数').setDescription('人数指定').setChoices({ name: '11人村', value: 11 }, { name: '13人村', value: 13 })),
+  new SlashCommandBuilder().setName('開始').setDescription('ゲームを開始')
+    .addBooleanOption(o => o.setName('debug').setDescription('デバッグ'))
+    .addIntegerOption(o => o.setName('人数').setDescription('人数指定').setChoices({ name: '11人村', value: 11 }, { name: '13人村', value: 13 }))
+    .addStringOption(o => o.setName('レギュレーション').setDescription('使用するレギュレーション名またはID'))
+    .addBooleanOption(o => o.setName('レギュレーション読み上げ').setDescription('ゲーム開始時のレギュレーション読み上げ (デフォルト: ON)')),
   new SlashCommandBuilder().setName('再開').setDescription('ゲームを再開').addStringOption(o => o.setName('ゲームid').setDescription('ID').setRequired(true)),
   new SlashCommandBuilder().setName('ミュート解除').setDescription('緊急解除'),
   new SlashCommandBuilder().setName('廃村').setDescription('強制削除').addStringOption(o => o.setName('ゲームid').setDescription('ID').setRequired(true)),

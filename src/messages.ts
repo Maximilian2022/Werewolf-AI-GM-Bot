@@ -98,14 +98,45 @@ export const MSG = {
     NIGHT_AWAY_SUCCESS: `☕ 退席中として記録しました。1分ごとにDMにリマインドを送ります。`,
     NIGHT_AWAY_RETURN_SUCCESS: `🏠 お帰りなさい！帰還として記録しました。`,
     NIGHT_AWAY_NOT_AWAY: `❌ あなたは退席中ではありません。`,
-    DM_AWAY_REMINDER: `☕ 現在「退席中」です。戻られましたら下のボタンを押して「帰還」を報告してください。`,
-    },
+    // 新規役職用DM・通知
+    DM_TRAPPER_PROMPT: `🪤 罠を仕掛ける対象を選択してください。`,
+    DM_COUNSELOR_PROMPT: `🩺 カウンセリングを行う対象を選択してください。`,
+    DM_SPY_PROMPT: `🕵️ 能力を妨害する対象を選択してください（役職ごとにゲーム中1回のみ）。`,
+    DM_HUNTER_PROMPT: `🏹 万一今夜襲撃された場合に道連れにする対象を選択してください。`,
+    DM_CUPID_PROMPT: `💘 恋人にする2名を選択してください。`,
+    DM_FEMME_FATALE_PROMPT: `💋 本命1名と手玉を選択してください。`,
+    DM_LIVING_SPIRIT_PROMPT: `👻 憑依する対象を1名選択してください。`,
+    DM_GOD_INFO: (rolesList: string) => `👁️ **【全知全能のお告げ】**\n村の全役職の内訳は以下の通りです:\n${rolesList}`,
+    DM_QUEEN_INFO: (queenName: string) => `👑 この村の女王は **${queenName}** さんです。命に代えてもお守りください。`,
+    DM_MASON_INFO: (partnerName: string) => `🤝 あなたの共有者パートナーは **${partnerName}** さんです。`,
+    DM_LOVERS_INFO: (partnerName: string) => `💕 あなたと **${partnerName}** さんは恋人になりました。どちらかが死亡すると後を追って死亡します。2人で生き残りを目指してください。`,
+    DM_SPY_BLOCKED: `⚠️ 何者かの妨害により、今夜は能力を発動できませんでした。`,
+    DM_TOUGH_GUY_ATTACKED: `🩸 あなたは人狼に襲撃されましたが、強靭な肉体で耐え抜きました。しかし毒が回り、今夜の個別部屋で息絶えます。`,
+    DM_TARGETED_CIVILIAN_INFECTED: `🐺 あなたは人狼の襲撃を受けましたが、人狼の血に目覚め人狼化しました！今夜から人狼VCに参加できます。`,
+    DM_COUNSELOR_REFORMED: `✨ あなたのカウンセリングにより、裏切り者の心が浄化され「村人」に更生しました！`,
+    DM_COUNSELOR_TARGET_REFORMED: `🕊️ あなたはカウンセラーによって更生され、村人陣営の「村人」になりました！`,
+    DM_LIVING_SPIRIT_INHERITED: (roleName: string) => `👻 憑依対象が死亡したため、あなたは「**${roleName}**」の役職・能力を引き継ぎました！`,
+    DICTATOR_BUTTON_LABEL: `👑 独裁者CO（即時処刑）`,
+    DICTATOR_CO_ANNOUNCE: (name: string) => `👑 <@${name}> さんが **独裁者CO** を行いました！議論を強制終了し、独断で即時処刑者を決定します。`,
+    HUNTER_EXEC_PROMPT: `🏹 道連れにする対象を選択してください。`
+  },
 
   // ==========================================
   // 音声読み上げ(TTS)用セリフ
   // ==========================================
   VOICE: {
     GREETING: `これより、人狼ゲームを開始します。各自の待機部屋へこちらで移動させたのち、役職配布を開始いたします。それでは、いってらっしゃいませ！`,
+    REGULATION_ANNOUNCE: (params: { playerCount: number; rolesSummary: string; rulesSummary?: string; day1DiscussionMin: number; }) => {
+      let text = `これより、人狼ゲームを開始します。本日のレギュレーションを発表します。`;
+      text += `参加人数は、${params.playerCount}名。`;
+      text += `役職構成は、${params.rolesSummary}です。`;
+      if (params.rulesSummary) {
+        text += `${params.rulesSummary}。`;
+      }
+      text += `第1日目の昼の議論時間は、${params.day1DiscussionMin}分間です。`;
+      text += `各自の待機部屋へこちらで移動させたのち、役職配布を開始いたします。それでは、いってらっしゃいませ！`;
+      return text;
+    },
     SEER_FIRST: (name: string) => `初日のお告げです。${name}さんは、村人陣営です。`,
     WOLF_MEET: (min: number) => `人狼の皆様、${min}分間の作戦会議です。スタート。`,
     WOLF_MEET_END: `内通時間終了です。夜が明けるまでしばらくお待ちください。`,
@@ -130,20 +161,54 @@ export const MSG = {
     NIGHT_ARRIVE_RESUMED: `中断再開のため1分延長します。`,
     
     PROMPT_WOLF: `内通時間終了です。人狼の皆様、今夜襲撃する対象を選択してください。`,
+    PROMPT_WOLF_DOUBLE: `今夜は2回襲撃が可能です。襲撃する対象を2名選択してください。`,
     PROMPT_SEER: `占い師の方、今夜占う対象を選択してください。`,
     PROMPT_KNIGHT: `騎士の方、今夜護衛する対象を選択してください。`,
+    PROMPT_APPRENTICE_SEER: `未熟な占い師の方、今夜占う対象と予想を選択してください。`,
+    PROMPT_RECKLESS_SEER: `無謀な占い師の方、今夜占う対象を選択してください。`,
+    PROMPT_FOX_POSSESSED: `狐憑きの方、今夜加護を与える対象を選択してください。`,
+    PROMPT_UNDERTAKER: `棺桶屋の方、明日処刑される人物を予想してください。`,
+    PROMPT_TRAPPER: `罠師の方、今夜罠を仕掛ける対象を選択してください。`,
+    PROMPT_COUNSELOR: `カウンセラーの方、今夜更生を試みる対象を選択してください。`,
+    PROMPT_SPY: `スパイの方、今夜能力を妨害する対象を選択してください。`,
+    PROMPT_HUNTER: `ハンターの方、万一の際に道連れにする対象を事前選択してください。`,
+    PROMPT_CUPID: `キューピットの方、運命の赤い糸で結ぶ2名を選択してください。`,
+    PROMPT_FEMME_FATALE: `悪女の方、本命1名と手玉を選択してください。`,
+    PROMPT_LIVING_SPIRIT: `生霊の方、憑依する対象を1名選択してください。`,
 
     WOLF_TARGET_SET: (name: string) => `襲撃先は、${name}さんですね。`,
     SEER_RESULT: (isWolf: boolean) => `結果は、${isWolf ? '人狼でした' : '人狼ではありませんでした'}。`,
+    APPRENTICE_SEER_RESULT: (isWolf: boolean, isCorrect: boolean) => `結果は、${isWolf ? '人狼でした' : '人狼ではありませんでした'}。予想は、${isCorrect ? '的中しました' : '外れてしまいました'}。`,
     KNIGHT_TARGET_SET: (name: string) => `${name}さんを護衛します。`,
+    FOX_PROTECT_SET: (name: string) => `${name}さんに狐の加護を与えます。`,
+    UNDERTAKER_TARGET_SET: (name: string) => `明日処刑される人物を、${name}さんと予想しました。`,
+    TRAPPER_TARGET_SET: (name: string) => `${name}さんに罠を仕掛けました。`,
+    COUNSELOR_TARGET_SET: (name: string) => `${name}さんにカウンセリングを行います。`,
+    SPY_TARGET_SET: (name: string) => `${name}さんの能力を妨害します。`,
     MEDIUM_RESULT: (name: string, isWolf: boolean) => `霊媒結果をお伝えします。処刑された${name}さんは、${isWolf ? '人狼でした' : '人狼ではありませんでした'}。`,
     
+    // 独裁者・特殊能力発動セリフ
+    DICTATOR_CO: `独裁者が名乗り出ました。独裁者による即時処刑が行われます。`,
+    DICTATOR_EXEC: (name: string) => `独裁者の命により、${name}さんが処刑されます。遺言をどうぞ。`,
+    HUNTER_SHOOT: (name: string) => `銃声が響き渡りました。ハンターの道連れにより、${name}さんが息絶えました。`,
+    BLACK_CAT_REVENGE: (name: string) => `黒猫の呪いにより、${name}さんが道連れになりました。`,
+    QUEEN_DIED: `女王が崩御されました。市民陣営は深い悲しみにより全滅しました。`,
+    QUEEN_INHERITED: (name: string) => `生霊が女王の遺志を継ぎ、新たな女王となりました。市民の全滅は免れました。`,
+    WOLF_CUB_ENRAGED: `人狼の子どもの死により、狼たちが激怒しています。今夜の襲撃は2回となります。`,
+    LOVERS_FOLLOW: (name: string) => `愛する者の死に絶望し、恋人の${name}さんが後を追って息絶えました。`,
+
     MORNING_KILLED: (name: string) => `おはようございます。昨晩の犠牲者は・・・${name}さんでした。`,
     MORNING_PEACE: `おはようございます。昨晩の犠牲者は・・・いませんでした。`,
     
     WIN_EXECUTION_VILLAGER: `やってきません。人狼陣営がいなくなったため、村人陣営の勝利です。`,
     WIN_EXECUTION_WOLF: `やってきません。人狼陣営と村人陣営の数が同数となったため、人狼陣営の勝利です。`,
     WIN_BITE_WOLF: `昼議論はありません。現在、人狼陣営と村人陣営の数が同数となったため、人狼陣営の勝利です！`,
+    WIN_LOVERS: `愛はすべてを超越しました。恋人陣営の勝利です！`,
+    WIN_LONE_WOLF: `群れを離れし孤高の狼、一匹狼の単独勝利です！`,
+    WIN_GOD: `全知全能の傍観者、神様の単独勝利です！`,
+    WIN_FOOL: `てるてる坊主が処刑されました。てるてる坊主の単独勝利です！`,
+    WIN_UNDERTAKER: `棺桶が二つ売れました。棺桶屋の単独勝利です！`,
+    WIN_FOX: `人狼と人間の争いの果てに、妖狐が生き残りました。妖狐陣営の勝利です！`,
     
     MVP_NEXT: `それではこれより、Gemini AIによるMVP選出を行います。少々お待ちください。`,
     MVP_ANNOUNCE_SINGLE: (title: string, name: string) => `本日の${title}は、${name}さんです！お疲れ様でした。`,

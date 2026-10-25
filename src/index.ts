@@ -4,10 +4,18 @@
  */
 import { Client, GatewayIntentBits, REST, Routes, MessageFlags} from 'discord.js';
 import * as dotenv from 'dotenv';
+import { LogRotator } from './utils/LogRotator.js';
+
+// 2段階ログローテーション機構の初期化 (Active:1,000行 -> Archive:100MB -> zstd/gzip圧縮10世代 & StdStreamTee)
+LogRotator.init();
+Logger.system('--- Bot Starting/Restarting with Bun (2-Stage Log Rotation Active) ---');
 import { CommandHandler } from './handlers/CommandHandler.js';
+import { PhaseHandler } from './handlers/PhaseHandler.js';
+import { StateManager } from './state/StateManager.js';
 import { WorkerManager } from './managers/WorkerManager.js';
 import { SettingsManager } from './managers/SettingsManager.js';
 import { CleanupService } from './services/CleanupService.js';
+import { WebServer } from './server/app.js';
 import { Logger } from './utils/logger.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -60,8 +68,14 @@ const commands = [
       {
         name: '人数',
         type: 4, // Integer
-        description: '参加人数（11または13）',
+        description: '参加人数（4人以上）',
         required: true,
+      },
+      {
+        name: 'レギュレーション',
+        type: 3, // String
+        description: '適用するレギュレーション名（省略時は人数に応じたプリセットを自動選択）',
+        required: false,
       },
       {
         name: 'debug',
@@ -70,6 +84,14 @@ const commands = [
         required: false,
       }
     ],
+  },
+  {
+    name: 'ダッシュボード',
+    description: 'WebUI管理画面（レギュレーション作成・ゲームモニター）のURLを表示します',
+  },
+  {
+    name: 'レギュレーション',
+    description: '登録されているレギュレーション一覧を表示します',
   },
   {
     name: '再開',
@@ -155,6 +177,8 @@ gmClient.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
       switch (interaction.commandName) {
         case '開始': await CommandHandler.handleStart(interaction, gmClient, assistantClient); break;
+        case 'ダッシュボード': await CommandHandler.handleDashboard(interaction); break;
+        case 'レギュレーション': await CommandHandler.handleRegulationList(interaction); break;
         case '再開': await CommandHandler.handleResume(interaction, gmClient, assistantClient); break;
         case '廃村': await CommandHandler.handleAbandon(interaction); break;
         case '観戦': await CommandHandler.handleSpectate(interaction); break;
@@ -301,6 +325,23 @@ async function bootstrap() {
 
   // 6. コマンド登録
   await registerCommands();
+
+  // 7. WebUI Express サーバーの起動
+  WebServer.getInstance().start(gmClient);
+
+  // 8. 進行中のゲームが存在する場合、自動復帰（リカバリ）を実行
+  const activeGameId = StateManager.getInstance().findLatestActiveGame();
+  if (activeGameId) {
+    Logger.info('System', `🔄 進行中のゲーム (${activeGameId}) を検知しました。自動復帰を開始します...`);
+    try {
+      if (StateManager.getInstance().loadFromFile(activeGameId)) {
+        await PhaseHandler.resumeGame(gmClient, assistantClient, activeGameId);
+        Logger.success('System', `✅ ゲーム (${activeGameId}) の自動復帰が完了しました`);
+      }
+    } catch (recoverErr) {
+      Logger.error('System', `❌ ゲーム (${activeGameId}) の自動復帰に失敗しました`, recoverErr);
+    }
+  }
 }
 
 

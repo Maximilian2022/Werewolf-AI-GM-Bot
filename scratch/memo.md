@@ -1,64 +1,19 @@
-# 調査メモ・改善項目一覧 (Werewolf AI GM Bot)
+# 人狼 AI GM Bot 新規役職実装 メモ (scratch/memo.md)
 
-## 1. 速度アップ (Speed-up)
-1. **VCWatcher による過剰な Discord REST API fetch のキャッシュ化**
-   - 現状: 10秒ごとに `guild.members.fetch(player.userId)` や `worker.guilds.fetch(...)` を直列ループで実行（毎分約80〜100回）。
-   - 改善: Gatewayから受け取っている `guild.voiceStates.cache.get(userId)` および `guild.members.cache.get(userId)` を優先参照。キャッシュミス時のみ fetch。これにより、10秒毎のREST API呼び出しがほぼ0回になり、レイテンシとレートリミットリスクを劇的に低減。
-2. **TTSService の In-Flight 重複リクエスト排除**
-   - 現状: 同一テキストへのリクエストが短時間に集中した場合、キャッシュファイルが未生成だと同一APIコールが重複実行される。
-   - 改善: `Map<string, Promise<string>>` で in-flight を追跡し、同一テキストの同時リクエストを合流させる。
-3. **VoiceService の playAudio における不要な固定待機時間（1秒）の最適化**
-   - 現状: 毎回再生前に `await new Promise(r => setTimeout(r, 1000))`（頭切れ対策）が入っており、発言毎に1秒以上の沈黙が発生。
-   - 改善: コネクション確立直後（初回またはチャンネル移動直後）のみ待機フラグを持たせ、すでに安定接続中の再生では待機をスキップ/最小限（200ms）にしてゲームテンポを大幅に向上。
-4. **WorkerManager の各Workerへの直列ギルドfetchの並列化**
-   - 現状: 16体のWorkerに対して直列で `await worker.guilds.fetch(...)`。
-   - 改善: キャッシュ優先 & `Promise.all` 並列化で高速化。
+## 概要
+- 約20種の新規役職（ハンター、独裁者、タフガイ、罠師、カウンセラー、一匹狼、恋人、神様、スパイ、内通者、人狼の子ども、占い師の弟子、狙われる市民、黒猫、キューピット、悪女、女王、生霊、狼の眷属、凶暴な狼）の追加実装。
+- 本番運用中につき無停止または最小限のコンテナ再起動で反映。
 
-## 2. 効率化 (Efficiency)
-1. **ActionQueue の再帰呼び出しを反復ループへ**
-   - 現状: `process()` が末尾で再帰 `await this.process()` を呼んでいる。
-   - 改善: `while (this.queue.length > 0)` ループに書き換え、スタック/不要なPromise連鎖を削減。
-2. **StateManager のアトミック保存 (Atomic Write) & 安定性強化**
-   - 現状: `fs.promises.writeFile` を直接ファイルに上書き保存している。書き込み途中でクラッシュ・再起動すると破損し再開不能になるリスク。
-   - 改善: 一時ファイル(`.tmp`)に書き出してから `rename` するアトミック書き込みを採用。中断後の再開安全性を最大化。
-3. **AudioPlayer のイベントリスナー漏れ防止**
-   - 現状: `playAudio` で `player.on(AudioPlayerStatus.Idle, ...)` を登録しているが、finish時に明示的なリスナークリーンアップがない。
-   - 改善: 解決時にリスナーを安全に解除。
-4. **CleanupService の定期実行 & 音声ファイル走査の効率化**
-   - 現状: 起動時に1回だけ実行。長期間稼働し続けるとディスクが圧迫される。
-   - 改善: 24時間ごとの定期クリーンアップタイマーを導入。
+## 実装計画と進捗
+- [x] 1. 役職定義と型定義 (`src/roles/types.ts`, `src/roles/definitions/NewRoles.ts`, `src/roles/RoleRegistry.ts`)
+- [x] 2. メッセージ定数追加 (`src/messages.ts`)
+- [x] 3. ゲーム状態・アクション型定義拡張 (`src/types.ts`, `src/engine/types.ts`)
+- [x] 4. ルール解決エンジン拡張 (`src/engine/NightActionResolver.ts`, `ExecutionResolver.ts`, `WinConditionChecker.ts`)
+- [x] 5. ゲーム進行ハンドラー拡張 (`src/handlers/PhaseHandler.ts`)
+- [x] 6. WebUIレギュレーションビルダー拡張 (`public/app.js`, `public/style.css`)
+- [x] 7. AI総評（AIService）へのレギュレーション情報の確認および追加 (`src/services/AIService.ts`, `src/regulations/RegulationManager.ts`, `src/handlers/PhaseHandler.ts`, `src/handlers/CommandHandler.ts`)
+- [x] 8. ビルド・型チェック検証 (`npm run build` 成功)
+- [x] 9. 本番コンテナ反映 (`docker cp` / `docker compose restart werewolf-gm-bot` 稼働確認完了)
+- [x] 10. WebUI・ダッシュボード表示確認
+- [x] 11. `logs/remediation_history.md` 追記
 
-## 3. 不具合修正 (Bug Fixes)
-1. **設定UI（モーダル）における「決選弁明時間」「決選投票時間」の欠落**
-   - 現状: `GameSettings` に `runoffDefenseMin`, `runoffVoteTimeoutMin` があるのに、設定モーダルや選択肢に反映されておらず変更不可。
-   - 改善: 設定画面モーダルに入力欄を追加し、正常に変更・保存できるように修正。
-2. **TTSService の動的プリフェッチにおけるハードコード修正**
-   - 現状: `MSG.VOICE.RUNOFF_DEFENSE_START(name, '1分')` とハードコードされ、設定値が反映されていない。
-   - 改善: `runoffDefenseMin` に応じた時間文字列を生成してプリフェッチ。
-3. **AIService の JSON パース堅牢化**
-   - 現状: `rawText.replace(/```json/g, '').replace(/```/g, '').trim()` のみで `JSON.parse`。モデルが思考テキストや解説を付与した場合にパース失敗し `不明` になる。
-   - 改善: JSONブロック `{[\s\S]*}` を抽出する正規表現フォールバックを実装。
-4. PhaseHandler におけるタイマー・インターバルの安全性
-    - 昼議論や夜フェーズの `setInterval` を `try...finally` で囲み、エラー発生時にも確実に `clearInterval` されるよう保護。
-
-## 4. ゲーム性・公平性・演出の健全性点検 (Gameplay Integrity Audit)
-1. **情報秘匿とチート防止**
-   - 夜の書記Bot物理切断（`VoiceService.disconnectClient`）: 夜の狼の密談や個室の独り言がAI録音や朝の要約に漏れない。
-   - 霊界VCの一方通行中継: 霊界の声が生存者VCに逆流しない。
-   - VC移動監視（`VCWatcher`）: キャッシュ化によりDiscord APIの429（スパム対策待機）によるフリーズを回避。10秒ごとに確実に迷子・侵入者を検知して強制送還。
-   - 役職・投票の個人チャンネル秘匿: 全体チャンネルには投票結果確定まで個別投票先は非公開。
-2. **ルール・公平性の厳密性**
-   - 役職配分: 11人/13人村等の規定ロール公平シャッフル。
-   - 占い師の初日白: 自分と人狼を除く村人陣営から1名ランダム選定。
-   - 騎士の連続護衛なし: 前夜護衛対象の除外、自分除外。護衛成功時は「昨夜の犠牲者はいませんでした」と平和アナウンス。
-   - 昼の投票: 自分への投票不可、死者投票不可、二重投票不可。
-   - 決選投票: 最多得票者同票時の弁明タイム、決選対象者以外のみ投票、再同票時のランダム処刑。
-   - 勝利判定: 人狼全滅→村人勝利、人狼>=村人→人狼勝利。
-3. **演出・テンポ・臨場感**
-   - 朝の発表演出: 犠牲者も含めてメインVCに一度集まり、GMボイスで「昨夜の犠牲者」を発表してから霊界送りになるドラマチックな演出を保持。
-   - 昼の議論タイマー: 5秒ごとの進捗バー、残り時間警告、一時停止時のタイマー延長。
-   - 終了後の感想戦: 全員集合、ミュート解除、役職公開、AI講評・MVP発表。
-   - 音声の頭切れ対策: 待機時間を初回500ms、2回目以降300ms（安全マージン）に設定済み。テンポを維持しつつ、全環境（スマホやWi-Fi）での頭切れを完全防止。
-4. **中断・再開の保全**
-   - `StateManager` のアトミック書き込み（`.tmp` -> `rename`）により、ゲームの進行状態（役職、生存フラグ、投票、フェーズ）が100%安全に保護。
-   - `/再開` コマンドで直前のフェーズから寸分狂わず再開可能。

@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>人狼 AI GM Bot - 管理ダッシュボード</title>
+  <link rel="icon" type="image/jpeg" href="assets/werewolf-dark-icon.jpg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 背景アンビエントグラデーション (赤黒・ブラッドムーン) -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="ambient-glow glow-bloodmoon"></div>
+
+  <!-- 🔐 Discordログイン必須ゲート画面 (未ログイン時に表示) -->
+  <div id="login-gate-screen" class="login-gate-container" style="display: none;">
+    <div class="login-gate-card glass-card">
+      <div class="login-brand-icon">
+        <img src="assets/werewolf-dark-icon.jpg" alt="Werewolf" class="dark-wolf-emblem large">
+      </div>
+      <h2 class="brand-title-cinzel">WEREWOLF GM BOT</h2>
+      <p class="login-subtitle">Dark Management Console</p>
+      <div class="login-gate-desc">
+        <p>このWebUIを利用するには、Discordアカウントでのログインが必要です。</p>
+        <p class="text-muted text-sm">役職情報やゲームの進行秘匿を保つため、アクセスが制限されています。</p>
+      </div>
+      <div class="login-gate-action">
+        <a href="/api/auth/discord/login" class="btn btn-discord btn-large" id="gate-discord-login-btn">
+          <svg class="discord-svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028z"/>
+          </svg>
+          Discordでログイン
+        </a>
+      </div>
+      <div class="login-gate-notice" id="gate-oauth-notice" style="display: none;">
+        ⚠️ <strong>管理者向け:</strong> Discord OAuth2（Client ID / Secret）が未設定です。環境変数または設定ファイルをご確認ください。
+      </div>
+    </div>
+  </div>
+
+  <!-- メインアプリケーションラッパー (ログイン後に表示) -->
+  <div id="app-wrapper" style="display: none;">
+
+    <!-- ナビゲーションバー -->
+    <header class="navbar">
+      <div class="nav-brand">
+        <div class="brand-icon">
+          <img src="assets/werewolf-dark-icon.jpg" alt="Werewolf" class="dark-wolf-emblem">
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title-cinzel">WEREWOLF GM BOT</h1>
+          <span class="brand-badge">MANAGEMENT CONSOLE</span>
+        </div>
+      </div>
+
+      <!-- ナビゲーションタブ -->
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="regulations" id="tab-regulations">
+          <span class="tab-icon">📜</span> レギュレーション
+        </button>
+        <button class="nav-tab" data-tab="monitor" id="tab-monitor">
+          <span class="tab-icon">📺</span> ゲームモニター
+        </button>
+        <button class="nav-tab" data-tab="settings" id="tab-settings">
+          <span class="tab-icon">⚙️</span> ゲーム設定
+        </button>
+        <!-- Zoom連携タブ -->
+        <button class="nav-tab" data-tab="zoom" id="tab-zoom">
+          <span class="tab-icon">🎥</span> Zoom連携
+        </button>
+        <!-- 管理者専用タブ (初期非表示) -->
+        <button class="nav-tab" data-tab="tunnel" id="tab-tunnel" style="display: none;">
+          <span class="tab-icon">☁️</span> Tunnel & Discord設定 <span class="badge-admin">ADMIN</span>
+        </button>
+      </nav>
+
+    <!-- ユーザーエリア -->
+    <div class="user-profile" id="user-profile-area">
+      <button class="btn btn-discord" id="btn-discord-login">
+        <svg class="discord-svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+          <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028z"/>
+        </svg>
+        Discordでログイン
+      </button>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ領域 -->
+  <main class="main-content">
+
+    <!-- ============================================== -->
+    <!-- TAB 1: レギュレーションビルダー -->
+    <!-- ============================================== -->
+    <section class="tab-pane active" id="pane-regulations">
+      <div class="section-header">
+        <div>
+          <h2>📜 レギュレーションビルダー</h2>
+          <p class="section-desc">役職構成やゲームルールを自由にカスタマイズし、オリジナルの村レギュレーションを作成・保存できます。</p>
+        </div>
+        <div class="header-actions">
+          <select id="preset-select" class="form-select">
+            <option value="">-- プリセットから選ぶ --</option>
+          </select>
+          <button class="btn btn-secondary" id="btn-new-regulation">＋ 新規作成</button>
+          <button class="btn btn-primary" id="btn-save-regulation">💾 この内容で保存</button>
+        </div>
+      </div>
+
+      <!-- 基本情報入力 -->
+      <div class="glass-card mb-4">
+        <div class="grid grid-3">
+          <div class="form-group">
+            <label for="reg-name">レギュレーション名 <span class="badge-required">必須</span></label>
+            <input type="text" id="reg-name" class="form-control" placeholder="例: 12人妖狐・棺桶屋村">
+          </div>
+          <div class="form-group span-2">
+            <label for="reg-desc">説明・特徴</label>
+            <input type="text" id="reg-desc" class="form-control" placeholder="例: 特殊役職が入り乱れる上級者向けレギュレーション">
+          </div>
+        </div>
+      </div>
+
+      <!-- 役職配分エディタ & 配分サマリー (右側に縦並びサマリー、左下に詳細ルール＆時間＆AI設定) -->
+      <div class="reg-builder-layout mb-4">
+        <!-- 左側メインカラム: 役職配分カウンター ＆ その直下に詳細ルール・時間・AI設定 -->
+        <div class="reg-main-column flex-1">
+          <!-- 1. 役職配分カウンター (1列) -->
+          <div class="glass-card mb-4">
+            <div class="card-header">
+              <h3>🎭 役職配分カウンター (全16役職)</h3>
+              <div class="counter-summary">
+                合計人数: <span class="highlight-number" id="total-player-count">0</span> 人
+              </div>
+            </div>
+            <div class="roles-list-single-column" id="roles-selector-container">
+              <!-- JSで1列の役職行（アコーディオン付き）を動的生成 -->
+            </div>
+          </div>
+
+          <!-- 2. 詳細ルール設定 ＆ 時間設定 ＆ 演出・AI設定 -->
+          <div class="glass-card">
+            <div class="card-header">
+              <h3>⚖️ 詳細ルール・制限時間・AI演出設定 (このレギュレーション独自)</h3>
+            </div>
+            <div class="rules-form p-2">
+              <!-- A. ゲーム進行ルール -->
+              <h4 class="settings-subheading mb-3">⚖️ ゲーム進行ルール</h4>
+              <div class="grid grid-3 mb-4">
+                <div class="form-group">
+                  <label for="rule-first-night">初日の占い</label>
+                  <select id="rule-first-night" class="form-select">
+                    <option value="white_npc">白通知（初日お告げあり）</option>
+                    <option value="free">初日自由占い</option>
+                    <option value="none">初日占いなし</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-guard">騎士の連続護衛</label>
+                  <select id="rule-guard" class="form-select">
+                    <option value="false">連続護衛なし（推奨）</option>
+                    <option value="true">連続護衛あり</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-runoff">決選投票の再同票</label>
+                  <select id="rule-runoff" class="form-select">
+                    <option value="random_execution">ランダム処刑（推奨）</option>
+                    <option value="no_execution">処刑なし（平和村）</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-medium">霊媒結果の発表</label>
+                  <select id="rule-medium" class="form-select">
+                    <option value="true">翌夜に霊媒師へ通知あり</option>
+                    <option value="false">通知なし</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="rule-wolf-vc">夜の人狼VC会話</label>
+                  <select id="rule-wolf-vc" class="form-select">
+                    <option value="true">夜の人狼VC通話を許可</option>
+                    <option value="false">テキストチャットのみ</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- B. 制限時間設定 (このレギュレーション独自) -->
+              <h4 class="settings-subheading mb-3">⏱️ 制限時間設定 (この村独自)</h4>
+              <div class="grid grid-3 mb-4">
+                <div class="form-group">
+                  <label for="reg-time-day1">1日目 昼議論時間 (分)</label>
+                  <input type="number" id="reg-time-day1" class="form-control" step="0.5" min="0.5" value="5">
+                </div>
+                <div class="form-group">
+                  <label for="reg-time-day2">2日目以降 昼議論時間 (分)</label>
+                  <input type="number" id="reg-time-day2" class="form-control" step="0.5" min="0.5" value="4">
+                </div>
+                <div class="form-group">
+                  <label for="reg-time-day-dec">日数減算 (分)</label>
+                  <input type="number" id="reg-time-day-dec" class="form-control" step="0.5" min="0" value="1">
+                </div>
+                <div class="form-group">
+                  <label for="reg-time-action">夜の行動制限時間 (分)</label>
+                  <input type="number" id="reg-time-action" class="form-control" step="0.5" min="0.5" value="1">
+                </div>
+                <div class="form-group">
+                  <label for="reg-time-runoff-def">決選弁明時間 (分)</label>
+                  <input type="number" id="reg-time-runoff-def" class="form-control" step="0.5" min="0.5" value="1">
+                </div>
+                <div class="form-group">
+                  <label for="reg-time-runoff-vote">決選投票時間 (分)</label>
+                  <input type="number" id="reg-time-runoff-vote" class="form-control" step="0.5" min="0.5" value="1">
+                </div>
+                <div class="form-group">
+                  <label for="reg-time-last-word">遺言時間 (分)</label>
+                  <input type="number" id="reg-time-last-word" class="form-control" step="0.5" min="0.5" value="1">
+                </div>
+              </div>
+
+              <!-- C. システム演出 & AI総評設定 (このレギュレーション独自) -->
+              <h4 class="settings-subheading mb-3">🎙️ システム演出 & AI総評設定 (この村独自)</h4>
+              <div class="grid grid-2 mb-3">
+                <div class="form-group">
+                  <label for="reg-sys-gm-voice">GM 音声モデル</label>
+                  <select id="reg-sys-gm-voice" class="form-select">
+                    <option value="ja-JP-Neural2-D">男性・低音 (Neural2-D / 推奨)</option>
+                    <option value="ja-JP-Neural2-C">男性・高音 (Neural2-C)</option>
+                    <option value="ja-JP-Neural2-B">女性・落ち着いた声 (Neural2-B)</option>
+                    <option value="ja-JP-Neural2-A">女性・明るい声 (Neural2-A)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="reg-sys-ai-model">AI 解析モデル</label>
+                  <select id="reg-sys-ai-model" class="form-select">
+                    <option value="gemini-flash-latest">Gemini Flash (最新版 / 推奨)</option>
+                    <option value="fallback">自動フォールバック (安全巡回)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="reg-sys-ai-tone">AI 講評トーン</label>
+                  <select id="reg-sys-ai-tone" class="form-select">
+                    <option value="normal">標準（的確・実用的）</option>
+                    <option value="gentle">優しい（初心者向け）</option>
+                    <option value="spicy">辛口（鬼コーチ）</option>
+                    <option value="extreme">激辛（毒舌・煽り）</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="reg-sys-mvp-mode">MVP 評価モード</label>
+                  <select id="reg-sys-mvp-mode" class="form-select">
+                    <option value="compare">両方表示（議論 & 貢献度）</option>
+                    <option value="discussion">議論重視モード</option>
+                    <option value="contribution">勝利貢献度重視モード</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- 🎙️ AI総評・音声録音トグルスイッチ -->
+              <div class="form-group p-3 rounded mb-2" style="background: rgba(225, 29, 72, 0.08); border: 1px solid rgba(225, 29, 72, 0.25);">
+                <label class="custom-checkbox d-flex align-items-center gap-2 mb-1" style="cursor: pointer;">
+                  <input type="checkbox" id="reg-enable-ai-recording" checked style="width: 18px; height: 18px; accent-color: var(--primary);">
+                  <strong style="font-size: 1rem; color: #fff;">🎙️ AI総評・音声録音の有効化（Gemini MVP選定・2000文字講評）</strong>
+                </label>
+                <span class="form-text text-muted text-sm d-block" style="padding-left: 26px;">
+                  ※OFFにするとゲーム終了時のGemini解析・長時間待機をスキップし、素早くスムーズに感想戦へ移行します。Zoomでは録音警告ポップアップが出なくなります（Discord / Zoom 両対応）。
+                </span>
+              </div>
+
+              <!-- 📜 レギュレーション読み上げトグルスイッチ -->
+              <div class="form-group p-3 rounded mb-2" style="background: rgba(225, 29, 72, 0.08); border: 1px solid rgba(225, 29, 72, 0.25);">
+                <label class="custom-checkbox d-flex align-items-center gap-2 mb-1" style="cursor: pointer;">
+                  <input type="checkbox" id="reg-enable-reg-announce" checked style="width: 18px; height: 18px; accent-color: var(--primary);">
+                  <strong style="font-size: 1rem; color: #fff;">📜 レギュレーション読み上げの有効化（開村時の音声アナウンス）</strong>
+                </label>
+                <span class="form-text text-muted text-sm d-block" style="padding-left: 26px;">
+                  ※ゲーム開始時、GMがロビーVCで本村の人数・役職構成・ルール設定・昼議論時間を音声で読み上げます（デフォルト: ON）。OFFにすると開始挨拶のみで即座に待機部屋へ移動します。
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右端サイドバー: 縦並び配分サマリー (常に追従するスティッキー) -->
+        <div class="reg-sidebar-column">
+          <!-- 右端で縦に並ぶ配分サマリー -->
+          <div class="glass-card sticky-summary">
+            <div class="card-header">
+              <h3>📊 役職配分サマリー</h3>
+              <span class="badge badge-player-count" id="summary-total-count">0人</span>
+            </div>
+            <p class="section-desc text-xs mb-2">割り振られた役職の内訳です</p>
+            <div class="distribution-summary-list" id="distribution-summary-list">
+              <!-- JSで割り振り済み役職を右端で縦に一覧表示 -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 保存済みレギュレーション一覧 -->
+      <div class="glass-card">
+        <div class="card-header">
+          <h3>📂 登録済みレギュレーション一覧</h3>
+        </div>
+        <div class="regulation-list" id="saved-regulations-list">
+          <!-- JSでリスト描画 -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- TAB 2: リアルタイムゲームモニター -->
+    <!-- ============================================== -->
+    <section class="tab-pane" id="pane-monitor">
+      <div class="section-header">
+        <div>
+          <h2>📺 リアルタイムゲームモニター</h2>
+          <p class="section-desc">進行中の人狼ゲームのフェーズ、生存者、ログをリアルタイムに確認できます。</p>
+        </div>
+        <div class="header-actions" style="display: flex; align-items: center; gap: 8px;">
+          <select id="select-active-game" class="form-select" style="min-width: 200px; display: none;">
+            <!-- 進行中のゲーム一覧 -->
+          </select>
+          <span class="live-indicator"><span class="live-dot"></span> LIVE POLLING</span>
+          <button class="btn btn-secondary btn-sm" id="btn-relock-monitor" style="display: none;">🔒 再ロック</button>
+          <button class="btn btn-secondary" id="btn-refresh-monitor">🔄 更新</button>
+        </div>
+      </div>
+
+      <!-- ロック画面（参加プレイヤー向け、または未ログイン時） -->
+      <div class="lock-screen-container" id="monitor-lock-screen" style="display: none;">
+        <div class="lock-card">
+          <div class="lock-icon" id="lock-icon-emoji">🔒</div>
+          <h3 id="lock-title">ゲーム進行中 - 情報保護ロック</h3>
+          <p id="lock-message">現在ゲームが進行中です。公平性と情報秘匿を保つため、ゲーム終了までモニターは閲覧できません。</p>
+          <div class="lock-footer" id="lock-footer-action">
+            <!-- ログイン促進ボタンまたはフェーズ表示 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- フルモニター画面（GM / 観戦者 / ゲーム終了後） -->
+      <div id="monitor-full-screen" style="display: none;">
+        <!-- ステータス概要バー -->
+        <div class="glass-card mb-4">
+          <div class="game-status-bar">
+            <div class="status-item">
+              <span class="status-label">GAME ID</span>
+              <span class="status-val font-mono" id="m-game-id">-</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">現在のフェーズ</span>
+              <span class="status-val badge-phase" id="m-phase">-</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">日数</span>
+              <span class="status-val" id="m-day">-</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">生存者 / 全体</span>
+              <span class="status-val" id="m-alive-count">-</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">一時停止</span>
+              <span class="status-val" id="m-paused">-</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-2 gap-4">
+          <!-- プレイヤー一覧 -->
+          <div class="glass-card">
+            <div class="card-header">
+              <h3>👥 プレイヤー状況一覧</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>名前 / ID</th>
+                    <th>役職</th>
+                    <th>生存状況</th>
+                  </tr>
+                </thead>
+                <tbody id="m-players-table-body">
+                  <!-- JSで生成 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- イベントログ -->
+          <div class="glass-card">
+            <div class="card-header">
+              <h3>📜 システムログ & イベント進行</h3>
+            </div>
+            <div class="console-box" id="m-event-logs">
+              <!-- JSでログ出力 -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ゲーム非開催時 -->
+      <div class="empty-state" id="monitor-empty-state">
+        <div class="empty-icon">
+          <img src="assets/werewolf-dark-icon.jpg" alt="Werewolf" class="dark-wolf-emblem medium">
+        </div>
+        <h3>現在開催中のゲームはありません</h3>
+        <p>Discordで <code>/開始</code> コマンドを実行して人狼ゲームを開始してください。</p>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- TAB 3: Tunnel & Discord設定 (インストラクション付き) -->
+    <!-- ============================================== -->
+    <section class="tab-pane" id="pane-tunnel">
+      <div class="section-header">
+        <div>
+          <h2>☁️ Cloudflare Tunnel & Discord 連携設定</h2>
+          <p class="section-desc">インターネット経由でのWebUI公開と、チート防止用Discord OAuth2認証を設定します。</p>
+        </div>
+      </div>
+
+      <div class="grid grid-2 gap-4">
+        <!-- Tunnel 設定フォーム -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h3>⚡ Cloudflare Tunnel 接続</h3>
+            <span class="status-pill status-stopped" id="tunnel-status-badge">STOPPED</span>
+          </div>
+
+          <div class="tunnel-form">
+            <div class="form-group mb-3">
+              <label for="tunnel-fqdn">公開用 FQDN (ドメイン)</label>
+              <input type="text" id="tunnel-fqdn" class="form-control" placeholder="例: gm.your-domain.com">
+              <small class="form-hint">Discordコマンド <code>/ダッシュボード</code> でこのURLが案内されます。</small>
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="tunnel-token">Tunnel Token <span class="badge-required">必須</span></label>
+              <input type="password" id="tunnel-token" class="form-control" placeholder="eyJhIjoi...">
+              <small class="form-hint">Cloudflare Zero Trustダッシュボードで発行したTunnelトークン。</small>
+            </div>
+
+            <div class="form-group mb-3">
+              <label class="checkbox-label">
+                <input type="checkbox" id="tunnel-autostart">
+                <span>Bot起動時に自動でTunnelを接続する</span>
+              </label>
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="discord-client-id">Discord Client ID (OAuth2用)</label>
+              <input type="text" id="discord-client-id" class="form-control" placeholder="例: 123456789012345678">
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="discord-client-secret">Discord Client Secret (OAuth2用)</label>
+              <input type="password" id="discord-client-secret" class="form-control" placeholder="••••••••••••••••••••">
+            </div>
+
+            <div class="tunnel-actions mt-4">
+              <button class="btn btn-secondary" id="btn-save-tunnel">💾 設定を保存</button>
+              <button class="btn btn-success" id="btn-start-tunnel">▶️ Tunnel 起動</button>
+              <button class="btn btn-danger" id="btn-stop-tunnel" style="display: none;">⏹️ Tunnel 停止</button>
+            </div>
+
+            <div class="tunnel-live-url mt-3" id="tunnel-url-box" style="display: none;">
+              <span>公開URL: </span>
+              <a href="#" target="_blank" id="tunnel-public-link" class="highlight-link"></a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Discord Bot & OAuth2 インストラクション (丁寧な図解) -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h3>📖 Discord Bot & Tunnel 設定ガイド</h3>
+          </div>
+          <div class="instruction-body">
+            <div class="step-card">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <h4>Cloudflare Zero Trust で Tunnel を作成</h4>
+                <p>Cloudflareダッシュボードの [Zero Trust] ➔ [Networks] ➔ [Tunnels] で新しいトンネルを作成します。取得した <strong>Token</strong> を左の入力欄に貼り付けます。</p>
+              </div>
+            </div>
+
+            <div class="step-card">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <h4>Public Hostname (公開ドメイン) の設定</h4>
+                <p>Tunnelの [Public Hostname] で以下を指定します：</p>
+                <ul>
+                  <li><strong>Domain:</strong> 左欄で入力したFQDN（例: <code>gm.your-domain.com</code>）</li>
+                  <li><strong>Type:</strong> <code>HTTP</code></li>
+                  <li><strong>URL:</strong> <code>localhost:3000</code></li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="step-card">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <h4>Discord Developer Portal での OAuth2 設定</h4>
+                <p><a href="https://discord.com/developers/applications" target="_blank" class="highlight-link">Discord Developer Portal</a> で対象Botを開き、[OAuth2] タブへ移動します。</p>
+                <ul>
+                  <li><strong>Redirects:</strong> 以下のURLを追加して保存します：<br>
+                    <code id="inst-redirect-url">https://&lt;FQDN&gt;/api/auth/discord/callback</code>
+                  </li>
+                  <li><strong>Client Information:</strong> [Client ID] と [Client Secret] を左欄に入力します。</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="step-card">
+              <div class="step-num">4</div>
+              <div class="step-content">
+                <h4>Privileged Gateway Intents の確認</h4>
+                <p>[Bot] タブで以下の3つのインテントがすべて <strong>ON</strong> になっていることを確認してください：</p>
+                <div class="intent-badges">
+                  <span class="badge badge-intent">PRESENCE INTENT</span>
+                  <span class="badge badge-intent">SERVER MEMBERS INTENT</span>
+                  <span class="badge badge-intent">MESSAGE CONTENT INTENT</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="step-card">
+              <div class="step-num">5</div>
+              <div class="step-content">
+                <h4>Bot のサーバー招待 (OAuth2 URL Generator)</h4>
+                <p>[OAuth2] ➔ [OAuth2 URL Generator] で以下を選択して生成されたURLからサーバーへ招待します：</p>
+                <ul>
+                  <li><strong>Scopes:</strong> <code>bot</code>, <code>applications.commands</code></li>
+                  <li><strong>Bot Permissions:</strong> チャンネル閲覧、メッセージ送信、埋め込みリンク、リアクション追加、VC接続、発言</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="step-card">
+              <div class="step-num">6</div>
+              <div class="step-content">
+                <h4>Discord コマンドでのダッシュボード案内</h4>
+                <p>Botが導入されたサーバーで <code>/ダッシュボード</code> と入力すると、設定した公開FQDNへのアクセスリンクが表示されます。ゲーム参加者への案内や設定確認にご活用ください。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- TAB 4: ゲーム制限時間・演出設定 -->
+    <!-- ============================================== -->
+    <section class="tab-pane" id="pane-settings">
+      <div class="section-header">
+        <div>
+          <h2>⚙️ ゲーム設定 & AI・音声マネージャー</h2>
+          <p class="section-desc">昼夜の制限時間、決選投票時間、AIトーン、GM音声モデルを変更できます。</p>
+        </div>
+        <button class="btn btn-primary" id="btn-save-settings">💾 ゲーム設定を保存</button>
+      </div>
+
+      <div class="grid grid-3 gap-4">
+        <!-- 通常モード制限時間 -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h3>🟢 通常モード (時間設定)</h3>
+          </div>
+          <div class="settings-form">
+            <div class="form-group mb-2">
+              <label>1日目議論 (分)</label>
+              <input type="number" id="s-day1-min" class="form-control" step="0.5">
+            </div>
+            <div class="form-group mb-2">
+              <label>2日目以降議論 (分)</label>
+              <input type="number" id="s-day2-min" class="form-control" step="0.5">
+            </div>
+            <div class="form-group mb-2">
+              <label>短縮幅 (分/日)</label>
+              <input type="number" id="s-day-dec" class="form-control" step="0.5">
+            </div>
+            <div class="form-group mb-2">
+              <label>夜の行動時間 (分)</label>
+              <input type="number" id="s-action-min" class="form-control" step="0.5">
+            </div>
+            <div class="form-group mb-2">
+              <label>決選弁明時間 (分)</label>
+              <input type="number" id="s-runoff-defense" class="form-control" step="0.5">
+            </div>
+            <div class="form-group mb-2">
+              <label>決選投票時間 (分)</label>
+              <input type="number" id="s-runoff-vote" class="form-control" step="0.5">
+            </div>
+            <div class="form-group mb-2">
+              <label>遺言時間 (分)</label>
+              <input type="number" id="s-last-word" class="form-control" step="0.5">
+            </div>
+          </div>
+        </div>
+
+        <!-- デバッグモード制限時間 -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h3>🐛 デバッグモード (高速進行)</h3>
+          </div>
+          <div class="settings-form">
+            <div class="form-group mb-2">
+              <label>1日目議論 (分)</label>
+              <input type="number" id="sd-day1-min" class="form-control" step="0.05">
+            </div>
+            <div class="form-group mb-2">
+              <label>2日目以降議論 (分)</label>
+              <input type="number" id="sd-day2-min" class="form-control" step="0.05">
+            </div>
+            <div class="form-group mb-2">
+              <label>夜の行動時間 (分)</label>
+              <input type="number" id="sd-action-min" class="form-control" step="0.05">
+            </div>
+            <div class="form-group mb-2">
+              <label>決選弁明時間 (分)</label>
+              <input type="number" id="sd-runoff-defense" class="form-control" step="0.05">
+            </div>
+            <div class="form-group mb-2">
+              <label>決選投票時間 (分)</label>
+              <input type="number" id="sd-runoff-vote" class="form-control" step="0.05">
+            </div>
+            <div class="form-group mb-2">
+              <label>遺言時間 (分)</label>
+              <input type="number" id="sd-last-word" class="form-control" step="0.05">
+            </div>
+          </div>
+        </div>
+
+        <!-- システム・AI・音声設定 -->
+        <div class="glass-card">
+          <div class="card-header">
+            <h3>🎙️ システム・演出・AI設定</h3>
+          </div>
+          <div class="settings-form">
+            <div class="form-group mb-3">
+              <label for="sys-gm-voice">GM 音声モデル</label>
+              <select id="sys-gm-voice" class="form-select">
+                <option value="ja-JP-Neural2-D">男性・低音 (Neural2-D / 推奨)</option>
+                <option value="ja-JP-Neural2-C">男性・高音 (Neural2-C)</option>
+                <option value="ja-JP-Neural2-B">女性・落ち着いた声 (Neural2-B)</option>
+                <option value="ja-JP-Neural2-A">女性・明るい声 (Neural2-A)</option>
+              </select>
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="sys-ai-model">AI 解析モデル</label>
+              <select id="sys-ai-model" class="form-select">
+                <option value="gemini-flash-latest">Gemini Flash (最新版 / 推奨)</option>
+                <option value="fallback">自動フォールバック (安全巡回)</option>
+                <option value="gemini-3-pro">Gemini 3 Pro (高精度)</option>
+                <option value="gemini-3-flash">Gemini 3 Flash (標準)</option>
+              </select>
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="sys-ai-tone">AI 講評トーン</label>
+              <select id="sys-ai-tone" class="form-select">
+                <option value="normal">標準（的確・実用的）</option>
+                <option value="gentle">優しい（初心者向け）</option>
+                <option value="spicy">辛口（鬼コーチ）</option>
+                <option value="extreme">激辛（毒舌・煽り）</option>
+              </select>
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="sys-mvp-mode">MVP 評価モード</label>
+              <select id="sys-mvp-mode" class="form-select">
+                <option value="compare">両方表示（議論 & 貢献度）</option>
+                <option value="discussion">議論重視モード</option>
+                <option value="contribution">勝利貢献度重視モード</option>
+              </select>
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="sys-data-retention">録音データ保持期間 (日)</label>
+              <input type="number" id="sys-data-retention" class="form-control" min="1" max="30">
+            </div>
+
+            <div class="form-group mb-3">
+              <label class="custom-checkbox d-flex align-items-center gap-2 mb-1" style="cursor: pointer;">
+                <input type="checkbox" id="sys-enable-reg-announce" checked style="width: 18px; height: 18px; accent-color: var(--primary);">
+                <strong>📜 レギュレーション読み上げの有効化（全体デフォルト）</strong>
+              </label>
+              <small class="form-hint" style="color: var(--text-muted); font-size: 0.8rem;">ゲーム開始時、GMがロビーVCで本村の人数・役職構成・主要ルールを音声で読み上げます（初期値: ON）</small>
+            </div>
+
+            <div class="form-group mb-3">
+              <label for="sys-gm-passcode">🔑 GMパスコード（WebUI情報保護解除用）</label>
+              <input type="text" id="sys-gm-passcode" class="form-control" placeholder="1234">
+              <small class="form-hint" style="color: var(--text-muted); font-size: 0.8rem;">Zoom人狼やゲーム進行中、Webモニターの役職秘匿を解除するための合言葉です（初期値: 1234）</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- VIEW: ZOOM 連携 -->
+    <!-- ============================================== -->
+    <section class="tab-pane" id="pane-zoom">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>🎥 Zoom 連携コンソール</h2>
+          <p class="view-subtitle">Private App (Meeting SDK) を通じてZoomミーティングにGM Botを召喚し、人狼ゲームを進行します</p>
+        </div>
+      </div>
+
+      <div class="grid-2-col">
+        <!-- 左列: Zoom Bot 召喚 & 設定フォーム -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h3>🚀 ミーティング参加・Bot召喚</h3>
+          </div>
+          
+          <div class="settings-form">
+            <!-- 1. プロファイル選択 -->
+            <div class="form-group mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label for="zoom-profile-select"><strong>1. 主催者プロファイル</strong></label>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-open-zoom-profiles-modal">
+                  ⚙️ プロファイル管理
+                </button>
+              </div>
+              <select id="zoom-profile-select" class="form-select">
+                <option value="">-- プロファイルを選択してください --</option>
+              </select>
+              <span class="form-text text-muted text-sm">※ミーティング主催者（Private App作成者）のプロファイルを選択してください</span>
+            </div>
+
+            <!-- 2. 招待URL自動パース -->
+            <div class="form-group mb-3">
+              <label for="zoom-url-input"><strong>2. Zoom 招待URL (自動パース)</strong></label>
+              <div class="input-group">
+                <input type="text" id="zoom-url-input" class="form-control" placeholder="https://us02web.zoom.us/j/... をペースト">
+                <button type="button" class="btn btn-secondary" id="btn-parse-zoom-url">パース</button>
+              </div>
+              <span class="form-text text-muted text-sm">招待URLを貼り付けると、ミーティング番号とパスコードが自動入力されます</span>
+            </div>
+
+            <!-- 3. ミーティング番号 & パスコード -->
+            <div class="row mb-3">
+              <div class="col-6">
+                <label for="zoom-meeting-number">ミーティング番号</label>
+                <input type="text" id="zoom-meeting-number" class="form-control" placeholder="例: 123 4567 8901">
+              </div>
+              <div class="col-6">
+                <label for="zoom-passcode">パスコード</label>
+                <input type="password" id="zoom-passcode" class="form-control" placeholder="パスコード">
+              </div>
+            </div>
+
+            <!-- 4. ホストキー (ハイブリッド対応) -->
+            <div class="form-group mb-3">
+              <label for="zoom-host-key">ホストキー (6桁・任意)</label>
+              <input type="text" id="zoom-host-key" class="form-control" placeholder="例: 123456 (空欄の場合は参加後に手動で共同ホスト化)">
+              <span class="form-text text-muted text-sm">※入力するとBotが自動でホスト権限を取得します。未入力でも入室後に手動で「共同ホスト」にすればOKです。</span>
+            </div>
+
+            <!-- 5. AI講評オプション -->
+            <div class="form-group mb-4">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="zoom-enable-ai-recording" checked>
+                <span class="checkmark"></span>
+                <strong>🎙️ Gemini AI講評・MVP選定（参加者の音声を個別録音）</strong>
+              </label>
+              <span class="form-text text-muted text-sm d-block mt-1">
+                ※OFFにすると録音を行わないため、Zoom画面に「録音されています」のポップアップが出ません。
+              </span>
+            </div>
+
+            <!-- 召喚・退出ボタン -->
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-primary flex-1 btn-large" id="btn-zoom-join">
+                🚀 Zoom に Bot を召喚する
+              </button>
+              <button type="button" class="btn btn-danger btn-large" id="btn-zoom-leave" style="display: none;">
+                🚪 退出させる
+              </button>
+            </div>
+          </div>
+
+          <!-- 仮想シミュレータパネル（デバッグ・動作確認用） -->
+          <div class="mt-4 pt-3" style="border-top: 1px dashed var(--border-color);">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h4 class="mb-0" style="font-size: 1rem;">🧪 仮想シミュレータ (1人デバッグモード)</h4>
+              <span class="badge" id="zoom-mock-badge" style="display: none; background: var(--accent); color: #000;">SIMULATING</span>
+            </div>
+            <p class="text-sm text-muted mb-2">Zoomミーティングを開かずに、仮想参加者（5〜13名）を召喚してゲーム進行やブレイクアウトルーム移動をテストできます。</p>
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <select id="zoom-mock-count" class="form-select" style="max-width: 140px;">
+                <option value="5">5人村 (少人数)</option>
+                <option value="7" selected>7人村 (標準)</option>
+                <option value="9">9人村 (1狂2狼)</option>
+                <option value="11">11人村 (多人数)</option>
+                <option value="13">13人村 (フル構成)</option>
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-start-zoom-mock">🚀 起動</button>
+              <button type="button" class="btn btn-danger btn-sm" id="btn-stop-zoom-mock" style="display: none;">🛑 停止</button>
+            </div>
+
+            <!-- クイックチャットコマンド送信 -->
+            <div id="zoom-mock-controls" style="display: none; margin-top: 8px;">
+              <span class="text-sm text-muted"><strong>💬 仮想チャットコマンド:</strong></span>
+              <div class="d-flex gap-1 flex-wrap mt-1">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-start">▶️ !開始</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-pause">⏸️ !一時停止</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-resume">▶️ !再開</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-help">❓ !ヘルプ</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右列: リアルタイム Zoom モニター & チャット -->
+        <div class="card glass-card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h3>📊 リアルタイム Zoom モニター</h3>
+            <span class="badge" id="zoom-status-badge">未接続</span>
+          </div>
+
+          <!-- 接続詳細情報 -->
+          <div class="zoom-monitor-box mb-3">
+            <div class="d-flex justify-content-between text-sm mb-2">
+              <span><strong>参加先:</strong> <span id="zoom-current-meeting">未接続</span></span>
+              <span><strong>権限状態:</strong> <span id="zoom-host-status">未取得</span></span>
+            </div>
+            <div class="d-flex justify-content-between text-sm">
+              <span><strong>現在の部屋:</strong> <span id="zoom-current-room">メインルーム</span></span>
+              <span><strong>参加人数:</strong> <span id="zoom-participant-count">0 人</span></span>
+            </div>
+          </div>
+
+          <!-- 参加者リスト -->
+          <div class="mb-3">
+            <label class="text-sm text-muted"><strong>👥 参加者一覧 (Zoom)</strong></label>
+            <div class="zoom-participant-list" id="zoom-participant-list">
+              <div class="text-muted text-center py-3">Botがミーティングに参加すると一覧が表示されます</div>
+            </div>
+          </div>
+
+          <!-- Zoom ミーティング内チャット -->
+          <div class="mb-3">
+            <label class="text-sm text-muted"><strong>💬 ミーティング内チャット (コマンド受付中)</strong></label>
+            <div class="zoom-chat-box" id="zoom-chat-box">
+              <div class="text-muted text-center py-3">チャットログがここにリアルタイム表示されます</div>
+            </div>
+            <div class="input-group mt-2">
+              <input type="text" id="zoom-chat-input" class="form-control" placeholder="チャットメッセージを入力 (例: !開始, !一時停止)">
+              <button type="button" class="btn btn-secondary" id="btn-send-zoom-chat">送信</button>
+            </div>
+          </div>
+
+          <!-- ゲーム開始トリガー -->
+          <div class="zoom-game-action p-3 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label for="zoom-game-reg-select" class="mb-0"><strong>適用レギュレーション:</strong></label>
+              <select id="zoom-game-reg-select" class="form-select" style="max-width: 200px;"></select>
+            </div>
+            <button type="button" class="btn btn-success w-100 btn-large" id="btn-zoom-start-game" disabled>
+              ▶ ゲームを開始する (Zoom)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下部: Zoom 事前設定インストラクション (アコーディオン) -->
+      <div class="card glass-card mt-4">
+        <details class="instruction-accordion">
+          <summary class="instruction-summary">
+            <span>📖 Zoom Private App (Meeting SDK) の事前準備・設定ガイド</span>
+            <span class="accordion-arrow">▼</span>
+          </summary>
+          <div class="instruction-content pt-3">
+            <h4>1. Zoom アカウントの設定（必須）</h4>
+            <p>主催者のZoom設定画面（<a href="https://zoom.us/profile/setting" target="_blank" rel="noopener">zoom.us/profile/setting</a>）で、以下を有効にしてください：</p>
+            <ul>
+              <li><strong>ブレイクアウトルーム:</strong> 「ミーティングにて（高度）」内のブレイクアウトルームを <code>ON</code> にし、「スケジューリング時にホストが参加者をブレイクアウトルームに割り当てることを許可」にチェック。</li>
+              <li><strong>共同ホスト:</strong> 「ミーティングにて（基本）」内の共同ホストを <code>ON</code>。</li>
+            </ul>
+
+            <h4 class="mt-3">2. Private App（Meeting SDK）の作成手順</h4>
+            <ol>
+              <li><a href="https://marketplace.zoom.us/develop/create" target="_blank" rel="noopener">Zoom App Marketplace</a> にアクセス。</li>
+              <li><strong>「Meeting SDK」</strong> アプリを選択して「Create」をクリック。</li>
+              <li>アプリ名（例: <code>Werewolf GM Bot</code>）を入力し、公開はせず <strong>Private（社内/開発用）</strong> として保存。</li>
+              <li><strong>App Credentials</strong> タブから <code>Client ID</code> と <code>Client Secret</code> をコピーし、当ダッシュボードの「プロファイル管理」に登録してください。</li>
+            </ol>
+
+            <h4 class="mt-3">3. ゲームの進め方</h4>
+            <p>Botがミーティングに参加したら、Zoomのチャットに <code>!開始</code> と打つか、上記「ゲームを開始する」ボタンを押せば、自動で役職配布・昼夜の部屋移動が開始されます！</p>
+
+            <h4 class="mt-3">4. 1人で動作確認・実機テストを行う方法</h4>
+            <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+              <p><strong>【案2: ブラウザ多重参加による実機テスト】</strong></p>
+              <ul>
+                <li>Google Chromeで「新しいプロファイルを追加」するか、シークレットウィンドウ / 別ブラウザ（EdgeやFirefox）を開きます。</li>
+                <li>Zoom参加URLを開き、「Zoom Meetings を開く」のポップアップを<strong>キャンセル</strong>します。</li>
+                <li>画面下部に現れる <strong>「ブラウザから参加する (Join from your browser)」</strong> をクリック。</li>
+                <li>アカウントログイン不要で名前だけ入力すれば、1台のPCから3〜5人分のタブを並べて同時参加させられます！</li>
+              </ul>
+              <p class="mt-2"><strong>【案3: 自分1人だけのミーティング疎通テスト】</strong></p>
+              <ul>
+                <li>参加者を集めず、自分1人だけのミーティングにBotを召喚します。</li>
+                <li>チャットで <code>!ヘルプ</code> を送って返信が来るか、マイクからBotのTTS音声が聞こえるか、ホストキーで権限が渡るかを1対1で最小検証できます。</li>
+              </ul>
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+  </main>
+  </div> <!-- #app-wrapper -->
+
+  <!-- ============================================== -->
+  <!-- MODAL: Zoom プロファイル管理モーダル -->
+  <!-- ============================================== -->
+  <div id="modal-zoom-profiles" class="modal-backdrop" style="display: none;">
+    <div class="modal-card glass-card modal-lg">
+      <div class="modal-header">
+        <h3>🎥 Zoom プロファイル管理</h3>
+        <button type="button" class="btn-close" id="btn-close-zoom-profiles-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted text-sm mb-3">
+          Zoomミーティングの主催者ごとに Meeting SDK の Client ID / Secret を登録できます。
+          遊ぶ相手やミーティング主催者に応じてドロップダウンで簡単に切り替えられます。
+        </p>
+
+        <!-- プロファイル登録・編集フォーム -->
+        <div class="p-3 mb-4 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
+          <h4 id="zoom-profile-form-title" class="mb-3 text-sm">➕ 新規プロファイル登録</h4>
+          <input type="hidden" id="zoom-form-profile-id">
+
+          <div class="row mb-2">
+            <div class="col-6">
+              <label for="zoom-form-name">プロファイル名</label>
+              <input type="text" id="zoom-form-name" class="form-control" placeholder="例: たろうさんのZoom, 〇〇サークル">
+            </div>
+            <div class="col-6">
+              <label for="zoom-form-client-id">Meeting SDK Client ID</label>
+              <input type="text" id="zoom-form-client-id" class="form-control" placeholder="Zoom MarketplaceのClient ID">
+            </div>
+          </div>
+
+          <div class="row mb-3">
+            <div class="col-6">
+              <label for="zoom-form-client-secret">Client Secret</label>
+              <input type="password" id="zoom-form-client-secret" class="form-control" placeholder="Zoom MarketplaceのClient Secret">
+            </div>
+            <div class="col-6">
+              <label for="zoom-form-host-key">デフォルトホストキー (任意・6桁)</label>
+              <input type="text" id="zoom-form-host-key" class="form-control" placeholder="例: 123456">
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-end gap-2">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-zoom-profile-edit" style="display: none;">キャンセル</button>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-save-zoom-profile">保存する</button>
+          </div>
+        </div>
+
+        <!-- 登録済みプロファイル一覧 -->
+        <h4>登録済みプロファイル</h4>
+        <div class="zoom-profiles-table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>プロファイル名</th>
+                <th>Client ID</th>
+                <th>Secret</th>
+                <th>デフォルトホストキー</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="zoom-profiles-tbody">
+              <tr>
+                <td colspan="5" class="text-center text-muted">プロファイルがまだ登録されていません</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

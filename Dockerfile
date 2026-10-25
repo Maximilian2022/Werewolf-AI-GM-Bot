@@ -27,28 +27,42 @@ FROM node:26.1.0-trixie-slim
 
 WORKDIR /app
 
-# 音声処理（@discordjs/voice, prism-media）に必要なシステムライブラリをインストール
+# 音声処理（@discordjs/voice, prism-media）およびCloudflare Tunnelに必要なシステムライブラリをインストール
 # ※軽量化のため --no-install-recommends を付与し、キャッシュを削除
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg libsodium23 build-essential python3 pkg-config libopus-dev && \
+    apt-get install -y --no-install-recommends ffmpeg libsodium23 build-essential python3 pkg-config libopus-dev curl ca-certificates && \
+    curl -L --output /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && \
+    dpkg -i /tmp/cloudflared.deb && \
+    rm -f /tmp/cloudflared.deb && \
     rm -rf /var/lib/apt/lists/*
 
-# 本番用のパッケージのみをインストール (dev dependencies を除外) opusだけはPackageからいれようとするとエラーになるので、個別にインストール
+# 本番用のパッケージのみをインストール
 COPY package*.json ./
 RUN npm cache clean --force
 RUN npm install -g npm
 RUN npm install --omit=dev
-RUN npm install @discordjs/opus
+# @discordjs/opus のネイティブビルドを確実に実行し、フォールバックとして opusscript も同梱
+RUN npm install @discordjs/opus opusscript && \
+    cd /app/node_modules/@discordjs/opus && \
+    npx @mapbox/node-pre-gyp rebuild && \
+    mkdir -p /app/node_modules/@discordjs/opus/prebuild/node-v147-napi-v3-linux-x64-glibc-2.41 /app/node_modules/@discordjs/opus/build/Release && \
+    cp /app/node_modules/@discordjs/opus/build-tmp-napi-v3/Release/opus.node /app/node_modules/@discordjs/opus/prebuild/node-v147-napi-v3-linux-x64-glibc-2.41/opus.node && \
+    cp /app/node_modules/@discordjs/opus/build-tmp-napi-v3/Release/opus.node /app/node_modules/@discordjs/opus/build/Release/opus.node
 
-# Stage 1 でビルドしたコンパイル済みコードをコピー
+# Stage 1 でビルドしたコンパイル済みコードとWebUI静的アセットをコピー
 COPY --from=builder /app/dist ./dist
+COPY public/ ./public/
+
+# Bun ランタイムを取り込み（ハイブリッド運用・高速実行）
+COPY --from=oven/bun:latest /usr/local/bin/bun /usr/local/bin/bun
 
 # Stateファイルや録音データ（OGG/TTS）を保存するディレクトリを作成
 RUN mkdir -p /app/data
 # 永続データ用ディレクトリの作成
 RUN mkdir -p /app/data/games /app/data/audio /app/data/tts_cache /app/logs
 
-# コンテナ起動時の実行コマンド
-CMD ["sh", "-c", "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] --- Bot Starting/Restarting ---\" >> /app/logs/bot.log && node dist/index.js 2>&1 | tee -a /app/logs/bot.log"]
-# デバッグ用コマンド（プロファイリング有効化）
-#CMD ["node", "--cpu-prof", "--cpu-prof-dir=/app/data", "dist/index.js"]
+# コンテナ起動時の実行コマンド（LogRotatorが自律的に2段階ローテーションするため、teeパイプ不要）
+CMD ["bun", "dist/index.js"]
+# フォールバック用（Node.js起動）:
+# CMD ["node", "dist/index.js"]
+
