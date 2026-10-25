@@ -709,7 +709,7 @@
       </div>
     </section>
 
-    <!-- ============================================== -->
+        <!-- ============================================== -->
     <!-- VIEW: ZOOM 連携 -->
     <!-- ============================================== -->
     <section class="tab-pane" id="pane-zoom">
@@ -720,283 +720,349 @@
         </div>
       </div>
 
-      <div class="grid-2-col">
-        <!-- 左列: Zoom Bot 召喚 & 設定フォーム -->
-        <div class="card glass-card">
-          <div class="card-header">
-            <h3>🚀 ミーティング参加・Bot召喚</h3>
-          </div>
-          
-          <div class="settings-form">
-            <!-- 1. プロファイル選択 -->
-            <div class="form-group mb-3">
-              <div class="d-flex justify-content-between align-items-center mb-1">
-                <label for="zoom-profile-select"><strong>1. 主催者プロファイル</strong></label>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-open-zoom-profiles-modal">
-                  ⚙️ プロファイル管理
+      <!-- Zoom サブタブ切り替え -->
+      <div class="zoom-sub-tabs">
+        <button type="button" class="zoom-sub-tab active" data-zoom-subtab="session" id="btn-subtab-zoom-session">
+          <span>🚀</span> ミーティング参加・Bot召喚
+        </button>
+        <button type="button" class="zoom-sub-tab" data-zoom-subtab="profiles" id="btn-subtab-zoom-profiles">
+          <span>🔑</span> プロファイル管理・作成ガイド
+        </button>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- サブペイン 1: ミーティング参加・Bot召喚 -->
+      <!-- ============================================== -->
+      <div class="zoom-sub-pane active" id="pane-sub-zoom-session">
+        <div class="grid-2-col">
+          <!-- 左列: Zoom Bot 召喚 & 設定フォーム -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>🚀 ミーティング参加・Bot召喚</h3>
+            </div>
+            
+            <div class="settings-form">
+              <!-- 1. プロファイル選択 -->
+              <div class="form-group mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label for="zoom-profile-select"><strong>1. 主催者プロファイル</strong></label>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-open-zoom-profiles-tab">
+                    ⚙️ プロファイル管理・ガイド ➔
+                  </button>
+                </div>
+                <select id="zoom-profile-select" class="form-select">
+                  <option value="">-- プロファイルを選択してください --</option>
+                </select>
+                <span class="form-text text-muted text-sm">※Meeting SDK App 作成者のプロファイルを選択してください</span>
+              </div>
+
+              <!-- 2. 招待URL自動パース -->
+              <div class="form-group mb-3">
+                <label for="zoom-url-input"><strong>2. Zoom 招待URL (自動パース)</strong></label>
+                <div class="input-group">
+                  <input type="text" id="zoom-url-input" class="form-control" placeholder="https://us02web.zoom.us/j/... をペースト">
+                  <button type="button" class="btn btn-secondary" id="btn-parse-zoom-url">パース</button>
+                </div>
+                <span class="form-text text-muted text-sm">ミーティングの招待リンクを貼り付けると番号とパスコードを自動抽出します</span>
+              </div>
+
+              <!-- 3. ミーティング番号 & パスコード -->
+              <div class="row mb-3">
+                <div class="col-6">
+                  <label for="zoom-meeting-number"><strong>ミーティング番号</strong></label>
+                  <input type="text" id="zoom-meeting-number" class="form-control" placeholder="例: 123 456 7890">
+                </div>
+                <div class="col-6">
+                  <label for="zoom-passcode"><strong>パスコード</strong></label>
+                  <input type="text" id="zoom-passcode" class="form-control" placeholder="例: abc123">
+                </div>
+              </div>
+
+              <!-- 4. ホストキー (任意) -->
+              <div class="form-group mb-3">
+                <label for="zoom-host-key"><strong>ホストキー (任意・6桁数字)</strong></label>
+                <input type="text" id="zoom-host-key" class="form-control" placeholder="例: 123456" maxlength="6">
+                <span class="form-text text-muted text-sm">※ホストキーを指定すると、Botがホスト権限を主張して自動でブレイクアウトルームを作成します</span>
+              </div>
+
+              <!-- 5. 録音オプション -->
+              <div class="form-group mb-4">
+                <label class="custom-checkbox d-flex align-items-center gap-2 mb-1" style="cursor: pointer;">
+                  <input type="checkbox" id="zoom-enable-ai-recording" checked style="width: 18px; height: 18px; accent-color: var(--primary);">
+                  <strong>🎙️ 昼の議論音声を録音（感想戦AI総評用）</strong>
+                </label>
+                <span class="form-text text-muted text-sm">昼フェーズの議論音声を録音し、ゲーム終了時にGemini AIがMVP講評を生成します</span>
+              </div>
+
+              <!-- 召喚・退出アクションボタン -->
+              <div class="d-flex gap-2">
+                <button type="button" class="btn btn-primary btn-large flex-1" id="btn-zoom-join">
+                  🚀 ミーティングに参加（召喚）
+                </button>
+                <button type="button" class="btn btn-danger btn-large flex-1" id="btn-zoom-leave" style="display: none;">
+                  🛑 ミーティングから退出
                 </button>
               </div>
-              <select id="zoom-profile-select" class="form-select">
-                <option value="">-- プロファイルを選択してください --</option>
-              </select>
-              <span class="form-text text-muted text-sm">※ミーティング主催者（Private App作成者）のプロファイルを選択してください</span>
+            </div>
+          </div>
+
+          <!-- 右列: Zoom リアルタイム制御パネル -->
+          <div class="card glass-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h3>🎛️ リアルタイム制御・モニタリング</h3>
+              <div class="zoom-status-badge-container">
+                <span class="badge" id="zoom-status-badge">未接続</span>
+              </div>
             </div>
 
-            <!-- 2. 招待URL自動パース -->
-            <div class="form-group mb-3">
-              <label for="zoom-url-input"><strong>2. Zoom 招待URL (自動パース)</strong></label>
+            <div class="p-3">
+              <!-- 接続中ミーティング情報 -->
+              <div class="zoom-live-info p-3 mb-3 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="text-muted text-sm">接続先:</span>
+                  <strong id="zoom-live-meeting-num">-</strong>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="text-muted text-sm">Bot現在地:</span>
+                  <span class="badge badge-secondary" id="zoom-live-current-room">メインルーム</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                  <span class="text-muted text-sm">ホスト権限:</span>
+                  <span id="zoom-live-host-status">❌ なし (一般参加者)</span>
+                </div>
+              </div>
+
+              <!-- コントロールボタン群 -->
+              <div class="d-flex gap-2 mb-3">
+                <button type="button" class="btn btn-success btn-sm flex-1" id="btn-zoom-start-game" disabled>
+                  ▶️ ゲームを開始する (!開始)
+                </button>
+                <button type="button" class="btn btn-warning btn-sm flex-1" id="btn-zoom-pause-game" disabled>
+                  ⏸️ 一時停止 (!一時停止)
+                </button>
+              </div>
+
+              <!-- ミュート一括制御 -->
+              <div class="d-flex gap-2 mb-3">
+                <button type="button" class="btn btn-secondary btn-sm flex-1" id="btn-zoom-mute-all" disabled>
+                  🔇 全員ミュート
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm flex-1" id="btn-zoom-unmute-all" disabled>
+                  🔊 全員ミュート解除
+                </button>
+              </div>
+
+              <!-- 参加者リスト -->
+              <h4 class="text-sm font-bold mb-2">👥 参加者一覧 (<span id="zoom-participant-count">0</span>名)</h4>
+              <div class="zoom-participants-container mb-3" style="max-height: 140px; overflow-y: auto;">
+                <ul class="list-group" id="zoom-participants-list">
+                  <li class="list-group-item text-muted text-sm text-center">参加者が検出されていません</li>
+                </ul>
+              </div>
+
+              <!-- リアルタイムチャットログ -->
+              <h4 class="text-sm font-bold mb-2">💬 ミーティング内チャット</h4>
+              <div class="zoom-chat-container mb-2" id="zoom-chat-box" style="height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px; font-size: 0.82rem; border: 1px solid var(--border-color);">
+                <div class="text-muted text-center pt-3">チャット履歴はありません</div>
+              </div>
               <div class="input-group">
-                <input type="text" id="zoom-url-input" class="form-control" placeholder="https://us02web.zoom.us/j/... をペースト">
-                <button type="button" class="btn btn-secondary" id="btn-parse-zoom-url">パース</button>
+                <input type="text" id="zoom-chat-input" class="form-control form-control-sm" placeholder="Botからチャットメッセージを送信..." disabled>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-send-zoom-chat" disabled>送信</button>
               </div>
-              <span class="form-text text-muted text-sm">招待URLを貼り付けると、ミーティング番号とパスコードが自動入力されます</span>
-            </div>
 
-            <!-- 3. ミーティング番号 & パスコード -->
-            <div class="row mb-3">
-              <div class="col-6">
-                <label for="zoom-meeting-number">ミーティング番号</label>
-                <input type="text" id="zoom-meeting-number" class="form-control" placeholder="例: 123 4567 8901">
-              </div>
-              <div class="col-6">
-                <label for="zoom-passcode">パスコード</label>
-                <input type="password" id="zoom-passcode" class="form-control" placeholder="パスコード">
-              </div>
-            </div>
-
-            <!-- 4. ホストキー (ハイブリッド対応) -->
-            <div class="form-group mb-3">
-              <label for="zoom-host-key">ホストキー (6桁・任意)</label>
-              <input type="text" id="zoom-host-key" class="form-control" placeholder="例: 123456 (空欄の場合は参加後に手動で共同ホスト化)">
-              <span class="form-text text-muted text-sm">※入力するとBotが自動でホスト権限を取得します。未入力でも入室後に手動で「共同ホスト」にすればOKです。</span>
-            </div>
-
-            <!-- 5. AI講評オプション -->
-            <div class="form-group mb-4">
-              <label class="custom-checkbox">
-                <input type="checkbox" id="zoom-enable-ai-recording" checked>
-                <span class="checkmark"></span>
-                <strong>🎙️ Gemini AI講評・MVP選定（参加者の音声を個別録音）</strong>
-              </label>
-              <span class="form-text text-muted text-sm d-block mt-1">
-                ※OFFにすると録音を行わないため、Zoom画面に「録音されています」のポップアップが出ません。
-              </span>
-            </div>
-
-            <!-- 召喚・退出ボタン -->
-            <div class="d-flex gap-2">
-              <button type="button" class="btn btn-primary flex-1 btn-large" id="btn-zoom-join">
-                🚀 Zoom に Bot を召喚する
-              </button>
-              <button type="button" class="btn btn-danger btn-large" id="btn-zoom-leave" style="display: none;">
-                🚪 退出させる
-              </button>
-            </div>
-          </div>
-
-          <!-- 仮想シミュレータパネル（デバッグ・動作確認用） -->
-          <div class="mt-4 pt-3" style="border-top: 1px dashed var(--border-color);">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <h4 class="mb-0" style="font-size: 1rem;">🧪 仮想シミュレータ (1人デバッグモード)</h4>
-              <span class="badge" id="zoom-mock-badge" style="display: none; background: var(--accent); color: #000;">SIMULATING</span>
-            </div>
-            <p class="text-sm text-muted mb-2">Zoomミーティングを開かずに、仮想参加者（5〜13名）を召喚してゲーム進行やブレイクアウトルーム移動をテストできます。</p>
-            <div class="d-flex gap-2 align-items-center mb-2">
-              <select id="zoom-mock-count" class="form-select" style="max-width: 140px;">
-                <option value="5">5人村 (少人数)</option>
-                <option value="7" selected>7人村 (標準)</option>
-                <option value="9">9人村 (1狂2狼)</option>
-                <option value="11">11人村 (多人数)</option>
-                <option value="13">13人村 (フル構成)</option>
-              </select>
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-start-zoom-mock">🚀 起動</button>
-              <button type="button" class="btn btn-danger btn-sm" id="btn-stop-zoom-mock" style="display: none;">🛑 停止</button>
-            </div>
-
-            <!-- クイックチャットコマンド送信 -->
-            <div id="zoom-mock-controls" style="display: none; margin-top: 8px;">
-              <span class="text-sm text-muted"><strong>💬 仮想チャットコマンド:</strong></span>
-              <div class="d-flex gap-1 flex-wrap mt-1">
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-start">▶️ !開始</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-pause">⏸️ !一時停止</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-resume">▶️ !再開</button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-mock-cmd-help">❓ !ヘルプ</button>
+              <!-- 仮想シミュレータ (デバッグモード) -->
+              <div class="mt-4 pt-3 border-top" style="border-color: var(--border-color) !important;">
+                <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                    <h5 class="text-sm font-bold mb-0">🧪 仮想シミュレータ (テスト用)</h5>
+                    <span class="text-muted text-xs">実際のZoomなしでUI動作・部屋移動を検証できます</span>
+                  </div>
+                  <div class="d-flex gap-1 align-items-center">
+                    <select id="zoom-sim-count" class="form-select form-select-sm" style="width: 80px;">
+                      <option value="5">5名</option>
+                      <option value="7" selected>7名</option>
+                      <option value="9">9名</option>
+                      <option value="11">11名</option>
+                      <option value="13">13名</option>
+                    </select>
+                    <button type="button" class="btn btn-outline-info btn-sm" id="btn-zoom-sim-start">起動</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="btn-zoom-sim-stop" style="display: none;">停止</button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- 右列: リアルタイム Zoom モニター & チャット -->
-        <div class="card glass-card">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <h3>📊 リアルタイム Zoom モニター</h3>
-            <span class="badge" id="zoom-status-badge">未接続</span>
-          </div>
-
-          <!-- 接続詳細情報 -->
-          <div class="zoom-monitor-box mb-3">
-            <div class="d-flex justify-content-between text-sm mb-2">
-              <span><strong>参加先:</strong> <span id="zoom-current-meeting">未接続</span></span>
-              <span><strong>権限状態:</strong> <span id="zoom-host-status">未取得</span></span>
-            </div>
-            <div class="d-flex justify-content-between text-sm">
-              <span><strong>現在の部屋:</strong> <span id="zoom-current-room">メインルーム</span></span>
-              <span><strong>参加人数:</strong> <span id="zoom-participant-count">0 人</span></span>
-            </div>
-          </div>
-
-          <!-- 参加者リスト -->
-          <div class="mb-3">
-            <label class="text-sm text-muted"><strong>👥 参加者一覧 (Zoom)</strong></label>
-            <div class="zoom-participant-list" id="zoom-participant-list">
-              <div class="text-muted text-center py-3">Botがミーティングに参加すると一覧が表示されます</div>
-            </div>
-          </div>
-
-          <!-- Zoom ミーティング内チャット -->
-          <div class="mb-3">
-            <label class="text-sm text-muted"><strong>💬 ミーティング内チャット (コマンド受付中)</strong></label>
-            <div class="zoom-chat-box" id="zoom-chat-box">
-              <div class="text-muted text-center py-3">チャットログがここにリアルタイム表示されます</div>
-            </div>
-            <div class="input-group mt-2">
-              <input type="text" id="zoom-chat-input" class="form-control" placeholder="チャットメッセージを入力 (例: !開始, !一時停止)">
-              <button type="button" class="btn btn-secondary" id="btn-send-zoom-chat">送信</button>
-            </div>
-          </div>
-
-          <!-- ゲーム開始トリガー -->
-          <div class="zoom-game-action p-3 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <label for="zoom-game-reg-select" class="mb-0"><strong>適用レギュレーション:</strong></label>
-              <select id="zoom-game-reg-select" class="form-select" style="max-width: 200px;"></select>
-            </div>
-            <button type="button" class="btn btn-success w-100 btn-large" id="btn-zoom-start-game" disabled>
-              ▶ ゲームを開始する (Zoom)
-            </button>
           </div>
         </div>
       </div>
 
-      <!-- 下部: Zoom 事前設定インストラクション (アコーディオン) -->
-      <div class="card glass-card mt-4">
-        <details class="instruction-accordion">
-          <summary class="instruction-summary">
-            <span>📖 Zoom Private App (Meeting SDK) の事前準備・設定ガイド</span>
-            <span class="accordion-arrow">▼</span>
-          </summary>
-          <div class="instruction-content pt-3">
-            <h4>1. Zoom アカウントの設定（必須）</h4>
-            <p>主催者のZoom設定画面（<a href="https://zoom.us/profile/setting" target="_blank" rel="noopener">zoom.us/profile/setting</a>）で、以下を有効にしてください：</p>
-            <ul>
-              <li><strong>ブレイクアウトルーム:</strong> 「ミーティングにて（高度）」内のブレイクアウトルームを <code>ON</code> にし、「スケジューリング時にホストが参加者をブレイクアウトルームに割り当てることを許可」にチェック。</li>
-              <li><strong>共同ホスト:</strong> 「ミーティングにて（基本）」内の共同ホストを <code>ON</code>。</li>
-            </ul>
+      <!-- ============================================== -->
+      <!-- サブペイン 2: プロファイル管理・作成ガイド -->
+      <!-- ============================================== -->
+      <div class="zoom-sub-pane" id="pane-sub-zoom-profiles">
+        <div class="grid-2-col mb-4">
+          <!-- 左列: プロファイル登録・編集フォーム -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3 id="zoom-profile-form-title">➕ プロファイル登録・編集</h3>
+            </div>
+            <div class="settings-form p-3">
+              <p class="text-muted text-sm mb-3">
+                Zoom App Marketplace で取得した Meeting SDK の Client ID / Secret を登録します。<br>
+                登録したプロファイルはミーティング参加時にワンクリックで選択できます。
+              </p>
+              <input type="hidden" id="zoom-form-profile-id">
 
-            <h4 class="mt-3">2. Private App（Meeting SDK）の作成手順</h4>
-            <ol>
-              <li><a href="https://marketplace.zoom.us/develop/create" target="_blank" rel="noopener">Zoom App Marketplace</a> にアクセス。</li>
-              <li><strong>「Meeting SDK」</strong> アプリを選択して「Create」をクリック。</li>
-              <li>アプリ名（例: <code>Werewolf GM Bot</code>）を入力し、公開はせず <strong>Private（社内/開発用）</strong> として保存。</li>
-              <li><strong>App Credentials</strong> タブから <code>Client ID</code> と <code>Client Secret</code> をコピーし、当ダッシュボードの「プロファイル管理」に登録してください。</li>
-            </ol>
+              <div class="form-group mb-3">
+                <label for="zoom-form-name"><strong>プロファイル名 <span class="badge-required" style="color: var(--primary);">必須</span></strong></label>
+                <input type="text" id="zoom-form-name" class="form-control" placeholder="例: たろうのZoom, 〇〇サークル用">
+              </div>
 
-            <h4 class="mt-3">3. ゲームの進め方</h4>
-            <p>Botがミーティングに参加したら、Zoomのチャットに <code>!開始</code> と打つか、上記「ゲームを開始する」ボタンを押せば、自動で役職配布・昼夜の部屋移動が開始されます！</p>
+              <div class="form-group mb-3">
+                <label for="zoom-form-client-id"><strong>Meeting SDK Client ID (SDK Key) <span class="badge-required" style="color: var(--primary);">必須</span></strong></label>
+                <input type="text" id="zoom-form-client-id" class="form-control" placeholder="Zoom Marketplaceの Client ID">
+              </div>
 
-            <h4 class="mt-3">4. 1人で動作確認・実機テストを行う方法</h4>
-            <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
-              <p><strong>【案2: ブラウザ多重参加による実機テスト】</strong></p>
-              <ul>
-                <li>Google Chromeで「新しいプロファイルを追加」するか、シークレットウィンドウ / 別ブラウザ（EdgeやFirefox）を開きます。</li>
-                <li>Zoom参加URLを開き、「Zoom Meetings を開く」のポップアップを<strong>キャンセル</strong>します。</li>
-                <li>画面下部に現れる <strong>「ブラウザから参加する (Join from your browser)」</strong> をクリック。</li>
-                <li>アカウントログイン不要で名前だけ入力すれば、1台のPCから3〜5人分のタブを並べて同時参加させられます！</li>
-              </ul>
-              <p class="mt-2"><strong>【案3: 自分1人だけのミーティング疎通テスト】</strong></p>
-              <ul>
-                <li>参加者を集めず、自分1人だけのミーティングにBotを召喚します。</li>
-                <li>チャットで <code>!ヘルプ</code> を送って返信が来るか、マイクからBotのTTS音声が聞こえるか、ホストキーで権限が渡るかを1対1で最小検証できます。</li>
-              </ul>
+              <div class="form-group mb-3">
+                <label for="zoom-form-client-secret"><strong>Client Secret <span class="badge-required" style="color: var(--primary);">必須</span></strong></label>
+                <input type="password" id="zoom-form-client-secret" class="form-control" placeholder="Zoom Marketplaceの Client Secret">
+                <span class="form-text text-muted text-sm">※Secretは暗号化通信され、サーバー内で安全に保管されます（編集時は未入力で既存キー保持）</span>
+              </div>
+
+              <div class="form-group mb-3">
+                <label for="zoom-form-host-key"><strong>デフォルトホストキー (任意・6桁数字)</strong></label>
+                <input type="text" id="zoom-form-host-key" class="form-control" placeholder="例: 123456" maxlength="6">
+                <span class="form-text text-muted text-sm">※Zoomプロフィールのホストキーを登録しておくと、Botが自動でホスト権限を取得します</span>
+              </div>
+
+              <div class="d-flex justify-content-end gap-2 pt-2">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-zoom-profile-edit" style="display: none;">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="btn-save-zoom-profile">💾 プロファイルを保存する</button>
+              </div>
             </div>
           </div>
-        </details>
+
+          <!-- 右列: 登録済みプロファイル一覧 -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>📋 登録済みプロファイル一覧</h3>
+            </div>
+            <div class="p-3">
+              <div class="zoom-profiles-table-container">
+                <table class="table zoom-profiles-table w-100" style="font-size: 0.88rem;">
+                  <thead>
+                    <tr style="border-bottom: 1px solid var(--border-crimson); color: var(--text-muted);">
+                      <th class="p-2">プロファイル名</th>
+                      <th class="p-2">Client ID</th>
+                      <th class="p-2">Secret</th>
+                      <th class="p-2">ホストキー</th>
+                      <th class="p-2 text-end">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="zoom-profiles-tbody">
+                    <tr>
+                      <td colspan="5" class="text-center text-muted p-4">プロファイルがまだ登録されていません</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 下部: Zoom App 作成・事前設定の完全インストラクションガイド -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h3>📖 Zoom Meeting SDK App 作成手順＆利用ガイド（完全無料）</h3>
+          </div>
+          <div class="p-3">
+            <div class="guide-tip-box mb-3">
+              💡 <strong>完全無料（$0）・クレジットカード登録不要:</strong> Meeting SDK App の作成および Client ID / Secret の取得には費用は一切かかりません。グループまたは参加者のうち最低1人がキーを持っていれば利用可能です！
+            </div>
+
+            <div class="guide-steps-grid">
+              <!-- STEP 1 -->
+              <div class="guide-step-card">
+                <div class="guide-step-header">
+                  <span class="guide-step-badge">STEP 1</span>
+                  <h4 class="guide-step-title">Zoom アカウントの設定</h4>
+                </div>
+                <div class="guide-step-body">
+                  <p>主催者のZoom設定画面（<a href="https://zoom.us/profile/setting" target="_blank" rel="noopener">zoom.us/profile/setting</a>）を開き、以下を <code>ON</code> にします：</p>
+                  <ul>
+                    <li><strong>ブレイクアウトルーム:</strong> 「ミーティングにて（高度）」内のブレイクアウトルームを有効にし、「スケジューリング時にホストが参加者を割り当てることを許可」にチェック。</li>
+                    <li><strong>共同ホスト:</strong> 「ミーティングにて（基本）」内の共同ホストを有効化。</li>
+                  </ul>
+                </div>
+              </div>
+
+              <!-- STEP 2 -->
+              <div class="guide-step-card">
+                <div class="guide-step-header">
+                  <span class="guide-step-badge">STEP 2</span>
+                  <h4 class="guide-step-title">Marketplaceでアプリ作成</h4>
+                </div>
+                <div class="guide-step-body">
+                  <ol>
+                    <li><a href="https://marketplace.zoom.us/develop/create" target="_blank" rel="noopener">Zoom App Marketplace (作成画面)</a> にログイン。</li>
+                    <li><strong>「Meeting SDK」</strong> アプリカードの <strong>「Create」</strong> をクリック。</li>
+                    <li>アプリ名（例: <code>Werewolf GM Bot</code>）を入力します。</li>
+                    <li>公開審査は不要です（社内/開発用としてそのまま利用可能）。</li>
+                  </ol>
+                </div>
+              </div>
+
+              <!-- STEP 3 -->
+              <div class="guide-step-card">
+                <div class="guide-step-header">
+                  <span class="guide-step-badge">STEP 3</span>
+                  <h4 class="guide-step-title">認証キーを取得して登録</h4>
+                </div>
+                <div class="guide-step-body">
+                  <ol>
+                    <li>アプリ設定画面の <strong>「App Credentials」</strong> タブを開きます。</li>
+                    <li><strong>Client ID</strong> と <strong>Client Secret</strong> をコピーします。</li>
+                    <li>当画面上部の「プロファイル登録・編集」フォームに貼り付け、<strong>「プロファイルを保存する」</strong> をクリック！</li>
+                  </ol>
+                </div>
+              </div>
+
+              <!-- STEP 4 -->
+              <div class="guide-step-card">
+                <div class="guide-step-header">
+                  <span class="guide-step-badge">STEP 4</span>
+                  <h4 class="guide-step-title">ゲームの開始と自動進行</h4>
+                </div>
+                <div class="guide-step-body">
+                  <p>「ミーティング参加」タブへ戻り、ミーティングURLを入力して召喚します。</p>
+                  <ul>
+                    <li>Zoom内チャットで <code>!開始</code> と送信すると自動でゲーム開始。</li>
+                    <li>夜フェーズになるとBotが参加者を個室や人狼部屋へ自動移動させ、朝になるとメインルームへ呼び戻します！</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- 1人テスト・Tips -->
+            <div class="mt-3 p-3 rounded" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color);">
+              <h5 class="text-sm font-bold text-white mb-2">🧪 1人で動作確認・実機テストを行うおすすめの方法</h5>
+              <div class="row text-sm text-muted">
+                <div class="col-6 mb-2">
+                  <strong class="text-white">① 仮想シミュレータ（画面内で即テスト）</strong><br>
+                  「ミーティング参加」タブの「🧪 仮想シミュレータ起動」を押せば、Zoom不要でダミー参加者（5〜13人）が生成され、チャットや部屋移動の挙動を即座に確認できます。
+                </div>
+                <div class="col-6 mb-2">
+                  <strong class="text-white">② ブラウザ多重参加（実機Zoomテスト）</strong><br>
+                  Chromeのシークレットウィンドウや別プロファイルからZoom参加URLを開き、「ブラウザから参加」を使えば、1台のPCから複数タブで同時参加させてテスト可能です。
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
   </main>
   </div> <!-- #app-wrapper -->
-
-  <!-- ============================================== -->
-  <!-- MODAL: Zoom プロファイル管理モーダル -->
-  <!-- ============================================== -->
-  <div id="modal-zoom-profiles" class="modal-backdrop" style="display: none;">
-    <div class="modal-card glass-card modal-lg">
-      <div class="modal-header">
-        <h3>🎥 Zoom プロファイル管理</h3>
-        <button type="button" class="btn-close" id="btn-close-zoom-profiles-modal">✕</button>
-      </div>
-      <div class="modal-body">
-        <p class="text-muted text-sm mb-3">
-          Zoomミーティングの主催者ごとに Meeting SDK の Client ID / Secret を登録できます。
-          遊ぶ相手やミーティング主催者に応じてドロップダウンで簡単に切り替えられます。
-        </p>
-
-        <!-- プロファイル登録・編集フォーム -->
-        <div class="p-3 mb-4 rounded" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
-          <h4 id="zoom-profile-form-title" class="mb-3 text-sm">➕ 新規プロファイル登録</h4>
-          <input type="hidden" id="zoom-form-profile-id">
-
-          <div class="row mb-2">
-            <div class="col-6">
-              <label for="zoom-form-name">プロファイル名</label>
-              <input type="text" id="zoom-form-name" class="form-control" placeholder="例: たろうさんのZoom, 〇〇サークル">
-            </div>
-            <div class="col-6">
-              <label for="zoom-form-client-id">Meeting SDK Client ID</label>
-              <input type="text" id="zoom-form-client-id" class="form-control" placeholder="Zoom MarketplaceのClient ID">
-            </div>
-          </div>
-
-          <div class="row mb-3">
-            <div class="col-6">
-              <label for="zoom-form-client-secret">Client Secret</label>
-              <input type="password" id="zoom-form-client-secret" class="form-control" placeholder="Zoom MarketplaceのClient Secret">
-            </div>
-            <div class="col-6">
-              <label for="zoom-form-host-key">デフォルトホストキー (任意・6桁)</label>
-              <input type="text" id="zoom-form-host-key" class="form-control" placeholder="例: 123456">
-            </div>
-          </div>
-
-          <div class="d-flex justify-content-end gap-2">
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-zoom-profile-edit" style="display: none;">キャンセル</button>
-            <button type="button" class="btn btn-primary btn-sm" id="btn-save-zoom-profile">保存する</button>
-          </div>
-        </div>
-
-        <!-- 登録済みプロファイル一覧 -->
-        <h4>登録済みプロファイル</h4>
-        <div class="zoom-profiles-table-container">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>プロファイル名</th>
-                <th>Client ID</th>
-                <th>Secret</th>
-                <th>デフォルトホストキー</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="zoom-profiles-tbody">
-              <tr>
-                <td colspan="5" class="text-center text-muted">プロファイルがまだ登録されていません</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
   </div>
 
   <script src="app.js"></script>

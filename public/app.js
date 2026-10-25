@@ -1107,6 +1107,15 @@ function renderZoomProfilesTable() {
       document.getElementById('zoom-form-host-key').value = profile.defaultHostKey || '';
       const cancelBtn = document.getElementById('btn-cancel-zoom-profile-edit');
       if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+      // プロファイル管理タブへ切り替えてフォームへスクロール
+      document.querySelectorAll('.zoom-sub-tab').forEach(t => t.classList.toggle('active', t.dataset.zoomSubtab === 'profiles'));
+      document.querySelectorAll('.zoom-sub-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-sub-zoom-profiles'));
+      const nameInput = document.getElementById('zoom-form-name');
+      if (nameInput) {
+        nameInput.focus();
+        nameInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     });
   });
 
@@ -1174,25 +1183,43 @@ function setupZoomHandlers() {
   if (urlInput) urlInput.addEventListener('change', handleParse);
   if (parseBtn) parseBtn.addEventListener('click', handleParse);
 
-  // プロファイルモーダル開閉
-  const modal = document.getElementById('modal-zoom-profiles');
-  const openBtn = document.getElementById('btn-open-zoom-profiles-modal');
-  const closeBtn = document.getElementById('btn-close-zoom-profiles-modal');
+  // Zoom サブタブ切り替え
+  const zoomSubTabs = document.querySelectorAll('.zoom-sub-tab');
+  const zoomSubPanes = document.querySelectorAll('.zoom-sub-pane');
+
+  const switchZoomSubTab = (targetTab) => {
+    zoomSubTabs.forEach(t => t.classList.toggle('active', t.dataset.zoomSubtab === targetTab));
+    zoomSubPanes.forEach(p => p.classList.toggle('active', p.id === `pane-sub-zoom-${targetTab}`));
+  };
+
+  zoomSubTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      switchZoomSubTab(tab.dataset.zoomSubtab);
+    });
+  });
+
+  // プロファイル管理・ガイドタブへの切り替えボタン
+  const openProfilesTabBtn = document.getElementById('btn-open-zoom-profiles-tab') || document.getElementById('btn-open-zoom-profiles-modal');
   const cancelEditBtn = document.getElementById('btn-cancel-zoom-profile-edit');
 
   const resetForm = () => {
-    document.getElementById('zoom-profile-form-title').textContent = '➕ 新規プロファイル登録';
+    document.getElementById('zoom-profile-form-title').textContent = '➕ プロファイル登録・編集';
     document.getElementById('zoom-form-profile-id').value = '';
     document.getElementById('zoom-form-name').value = '';
     document.getElementById('zoom-form-client-id').value = '';
     document.getElementById('zoom-form-client-secret').value = '';
-    document.getElementById('zoom-form-client-secret').placeholder = 'Zoom MarketplaceのClient Secret';
+    document.getElementById('zoom-form-client-secret').placeholder = 'Zoom Marketplaceの Client Secret';
     document.getElementById('zoom-form-host-key').value = '';
     if (cancelEditBtn) cancelEditBtn.style.display = 'none';
   };
 
-  if (openBtn) openBtn.addEventListener('click', () => { resetForm(); modal.style.display = 'flex'; });
-  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  if (openProfilesTabBtn) {
+    openProfilesTabBtn.addEventListener('click', () => {
+      resetForm();
+      switchZoomSubTab('profiles');
+      document.getElementById('zoom-form-name')?.focus();
+    });
+  }
   if (cancelEditBtn) cancelEditBtn.addEventListener('click', resetForm);
 
   // プロファイル保存
@@ -1224,6 +1251,7 @@ function setupZoomHandlers() {
         if (data.success) {
           resetForm();
           await loadZoomProfiles();
+          alert(`✅ プロファイル「${name}」を正常に保存しました！`);
         } else {
           alert('保存に失敗しました: ' + (data.error || '不明なエラー'));
         }

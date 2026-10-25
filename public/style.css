@@ -1308,3 +1308,130 @@ body {
   border-radius: 4px;
   color: #fbbf24;
 }
+
+/* ============================================== */
+/* ZOOM サブタブ & プロファイル管理・ガイドスタイル */
+/* ============================================== */
+.zoom-sub-tabs {
+  display: flex;
+  gap: 0.5rem;
+  background: rgba(10, 10, 15, 0.6);
+  padding: 0.35rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-crimson);
+  margin-bottom: 1.5rem;
+  width: fit-content;
+}
+
+.zoom-sub-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.55rem 1.2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.zoom-sub-tab:hover {
+  color: #fff;
+  background: rgba(225, 29, 72, 0.12);
+}
+
+.zoom-sub-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, #e11d48 0%, #9f1239 100%);
+  box-shadow: 0 2px 12px rgba(225, 29, 72, 0.4);
+  font-weight: 600;
+}
+
+.zoom-sub-pane {
+  display: none;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.zoom-sub-pane.active {
+  display: block;
+}
+
+/* 作成ガイド・ステップカード */
+.guide-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.guide-step-card {
+  background: rgba(20, 20, 28, 0.6);
+  border: 1px solid rgba(225, 29, 72, 0.2);
+  border-radius: 10px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.guide-step-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(225, 29, 72, 0.5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.guide-step-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.guide-step-badge {
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 100%);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 20px;
+  letter-spacing: 0.5px;
+}
+
+.guide-step-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+.guide-step-body {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  flex: 1;
+}
+
+.guide-step-body ol, .guide-step-body ul {
+  padding-left: 1.2rem;
+  margin: 0.4rem 0 0.5rem 0;
+}
+
+.guide-step-body li {
+  margin-bottom: 0.25rem;
+}
+
+.guide-tip-box {
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #fef08a;
+  line-height: 1.5;
+}
+

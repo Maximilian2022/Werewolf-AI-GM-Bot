@@ -56,7 +56,7 @@ Zoomミーティング上でも、Botを参加させて人狼ゲームを楽し�
 
 > [!IMPORTANT]
 > **⚠️ Zoom連携における重要な利用条件（制限事項）**  
-> ZoomミーティングへBotを参加（召喚）させるには、**グループまたは参加者の中に最低1人、「Zoom App Marketplace（開発者ポータル）」で Meeting SDK App を作成し、Client ID（SDK Key）と Client Secret を取得・登録している人が必要**です。  
+> ZoomミーティングへBotを参加（召喚）させるには、**グループまたは参加者の中に最低1人、「Zoom App Marketplace（開発者ポータル）」で Meeting SDK App を作成し、Client ID（SDK Key）と Client Secret を取得・登録している人が必要**です。(無料作成)  
 > 取得したキーはWebダッシュボードの「Zoom連携」タブからプロファイルとして一度登録するだけで、次回以降はURLを入力するだけで簡単に召喚できます。
 
 #### 1. 準備するもの
