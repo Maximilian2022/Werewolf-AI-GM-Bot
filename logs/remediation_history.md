@@ -557,6 +557,21 @@ GitHub Code Scanning（CodeQL）において報告されていた 3 件の脆弱
    - `npm run build` によるコンパイル成功を確認。
    - コンテナ内でのパッケージ追加（`express-rate-limit`, `lusca`）および `docker cp` / 再起動により正常稼働を確認。
 
+## 2026-10-25 Dependabot 設定新設、CodeQL Cookie SSL強制リテラル化、および依存脆弱性解消
+
+### 概要
+GitHub Dependabot の自動更新設定（`.github/dependabot.yml`）を新設し、CodeQL の Alert #6 (`js/clear-text-cookie`) を解消するため `secure: true` をリテラル指定に更新しました。また、過去ログファイル（`logs/bot-archive.log`）の Git 追跡を解除しました。
+
+### 実施した変更
+1. **Dependabot 設定の新設 (`.github/dependabot.yml`)**:
+   - npm、Docker、GitHub Actions の3つのエコシステムについて週次（月曜朝9時JST）の自動依存関係チェック・PR作成ルールを定義。
+   - `@types/*`、`typescript` 等の開発依存関係をグループ化してPRを束ねる設定を追加。
+2. **Cookie セキュア属性のリテラル強制 (`src/server/app.ts`)**:
+   - CodeQL の静的解析エンジンが確実に SSL 暗号化強制を認識できるよう、`cookie.secure` を `true` リテラルに指定（Alert #6 の完全解消）。
+3. **不要ログファイルの Git 追跡解除 (`logs/bot-archive.log`)**:
+   - リモートマージ時に混入した旧ログアーカイブファイルを Git インデックスから追跡解除。
+
+
 
 
 

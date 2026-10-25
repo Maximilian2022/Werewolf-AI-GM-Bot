@@ -76,14 +76,13 @@ export class WebServer {
     this.app.use(express.urlencoded({ extended: true }));
     this.app.use(cookieParser());
 
-    // セキュアCookie設定（CWE-614 / CWE-319 対策）
-    const isSecureCookie = process.env.COOKIE_INSECURE === 'true' ? false : true;
+    // セキュアCookie設定（CWE-614 / CWE-319 対策: 常時SSL暗号化を強制）
     this.app.use(session({
       secret: process.env.SESSION_SECRET || 'werewolf-gm-bot-super-secret-key-2026',
       resave: false,
       saveUninitialized: false,
       cookie: {
-        secure: isSecureCookie, // HTTPS / Secure Cookie を強制
+        secure: true, // HTTPS / Secure Cookie を強制
         httpOnly: true,
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000 // 7日間
@@ -96,7 +95,7 @@ export class WebServer {
       cookie: {
         options: {
           sameSite: 'lax',
-          secure: isSecureCookie,
+          secure: true,
           httpOnly: false // フロントエンドJSがヘッダー付与用に読み取り可能
         }
       }
