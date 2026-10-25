@@ -163,6 +163,8 @@ export interface ZoomParticipant {
   isMuted: boolean;              // ミュート状態
   breakoutRoomId?: string;       // 割り当てブレイクアウトルームID
   currentRoomName?: string;      // 表示用ルーム名（メインルーム、人狼の部屋、霊界など）
+  role?: string;                 // ゲーム内役職（例: 人狼, 占い師, 市民など）
+  isAlive?: boolean;             // 生存状態（false: 処刑・襲撃死）
 }
 
 export interface ZoomMeetingStatus {

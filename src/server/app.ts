@@ -594,6 +594,12 @@ export class WebServer {
       res.json({ success: true });
     });
 
+    this.app.post('/api/zoom/mute', requireAuth, async (req: Request, res: Response) => {
+      const { target = 'all', muted = true } = req.body;
+      await zoomService.setMute(target, Boolean(muted));
+      res.json({ success: true, target, muted: Boolean(muted) });
+    });
+
     // ==========================================
     // 7. Zoom 仮想シミュレータ API (デバッグモード)
     // ==========================================

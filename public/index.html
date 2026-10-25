@@ -810,7 +810,10 @@
           <div class="card glass-card">
             <div class="card-header d-flex justify-content-between align-items-center">
               <h3>🎛️ リアルタイム制御・モニタリング</h3>
-              <div class="zoom-status-badge-container">
+              <div class="zoom-status-badge-container d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm" id="btn-toggle-gm-voice" title="ブラウザ音声によるGMアナウンスの読み上げON/OFF" style="padding: 2px 8px; font-size: 0.75rem; background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.4); color: #34d399; border-radius: 4px; cursor: pointer;">
+                  🔊 GM音声: ON
+                </button>
                 <span class="badge" id="zoom-status-badge">未接続</span>
               </div>
             </div>
@@ -854,7 +857,7 @@
 
               <!-- 参加者リスト -->
               <h4 class="text-sm font-bold mb-2">👥 参加者一覧 (<span id="zoom-participant-count">0</span>名)</h4>
-              <div class="zoom-participants-container mb-3" style="max-height: 140px; overflow-y: auto;">
+              <div class="zoom-participants-container mb-3" style="max-height: 180px; overflow-y: auto;">
                 <ul class="list-group" id="zoom-participants-list">
                   <li class="list-group-item text-muted text-sm text-center">参加者が検出されていません</li>
                 </ul>
@@ -862,7 +865,7 @@
 
               <!-- リアルタイムチャットログ -->
               <h4 class="text-sm font-bold mb-2">💬 ミーティング内チャット</h4>
-              <div class="zoom-chat-container mb-2" id="zoom-chat-box" style="height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px; font-size: 0.82rem; border: 1px solid var(--border-color);">
+              <div class="zoom-chat-container mb-2" id="zoom-chat-box" style="height: 180px; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px; font-size: 0.82rem; border: 1px solid var(--border-color); display: flex; flex-direction: column;">
                 <div class="text-muted text-center pt-3">チャット履歴はありません</div>
               </div>
               <div class="input-group">

@@ -162,6 +162,12 @@ export class ZoomService extends EventEmitter {
   /**
    * チャットメッセージ受信時のコマンドハンドラ
    */
+  private mockTimeouts: NodeJS.Timeout[] = [];
+  private mockGameRunning: boolean = false;
+
+  /**
+   * チャットメッセージ受信時のコマンドハンドラ
+   */
   public handleIncomingChatMessage(sender: string, message: string, senderUserId: string): void {
     const text = message.trim();
     const logEntry = {
@@ -178,12 +184,23 @@ export class ZoomService extends EventEmitter {
     if (text === '!開始' || text === '/開始' || text.toLowerCase() === '!start') {
       Logger.info('ZoomService', `チャットからゲーム開始コマンドを受信しました (送信者: ${sender})`);
       this.emit('commandStartGame', { sender, senderUserId });
+      if (this.status.isMockMode) {
+        this.startMockGameLoop();
+      }
     } else if (text === '!一時停止' || text === '/一時停止' || text === '!pause') {
       this.emit('commandPauseGame', { sender, senderUserId });
-      this.sendChatMessage('⏸️ ゲームタイマーを一時停止しました。再開時は「!再開」と入力してください。');
+      if (this.status.isMockMode) {
+        this.pauseMockGameLoop();
+      } else {
+        this.sendChatMessage('⏸️ ゲームタイマーを一時停止しました。再開時は「!再開」と入力してください。');
+      }
     } else if (text === '!再開' || text === '/再開' || text === '!resume') {
       this.emit('commandResumeGame', { sender, senderUserId });
-      this.sendChatMessage('▶️ ゲームを再開しました。');
+      if (this.status.isMockMode) {
+        this.resumeMockGameLoop();
+      } else {
+        this.sendChatMessage('▶️ ゲームを再開しました。');
+      }
     } else if (text === '!ヘルプ' || text === '/ヘルプ' || text === '!help') {
       this.sendChatMessage(
         '📜 【コマンド一覧】\n' +
@@ -200,6 +217,8 @@ export class ZoomService extends EventEmitter {
    * @param count 参加人数 (5〜13人)
    */
   public startMockSimulation(count: number = 7): { success: boolean; message: string } {
+    this.stopMockGameLoop();
+
     const dummyNames = [
       'ホスト (あなた)',
       'Alice (占い希望)',
@@ -227,7 +246,8 @@ export class ZoomService extends EventEmitter {
         isCoHost: i === 1,
         isMuted: false,
         breakoutRoomId: 'main',
-        currentRoomName: '🏠 メインルーム'
+        currentRoomName: '🏠 メインルーム',
+        isAlive: true
       });
     }
 
@@ -249,7 +269,7 @@ export class ZoomService extends EventEmitter {
     this.status.participants = mockParticipants;
     this.status.error = null;
 
-    this.sendChatMessage(`🧪 【シミュレータ起動】仮想参加者 ${safeCount}名 が集合しました。「!開始」またはゲーム開始ボタンでテスト可能です。`);
+    this.sendChatMessage(`🧪 【シミュレータ起動】仮想参加者 ${safeCount}名 が集合しました。「!開始」または「ゲームを開始する」ボタンで人狼ゲームの進行・部屋移動・音声テストを開始できます。`);
     this.emit('statusChange', this.status);
 
     Logger.info('ZoomService', `🧪 仮想シミュレータを開始しました (参加者: ${safeCount}名)`);
@@ -261,6 +281,7 @@ export class ZoomService extends EventEmitter {
    */
   public stopMockSimulation(): void {
     if (!this.status.isMockMode) return;
+    this.stopMockGameLoop();
     Logger.info('ZoomService', '🧪 仮想シミュレータを停止します');
     this.status.isConnected = false;
     this.status.isConnecting = false;
@@ -273,12 +294,214 @@ export class ZoomService extends EventEmitter {
   }
 
   /**
+   * 仮想シミュレータのタイマーを全停止
+   */
+  private clearMockTimeouts(): void {
+    this.mockTimeouts.forEach(t => clearTimeout(t));
+    this.mockTimeouts = [];
+  }
+
+  /**
+   * 仮想人狼ゲームループの停止
+   */
+  public stopMockGameLoop(): void {
+    this.clearMockTimeouts();
+    this.mockGameRunning = false;
+  }
+
+  /**
+   * 仮想人狼ゲームループの一時停止
+   */
+  public pauseMockGameLoop(): void {
+    this.clearMockTimeouts();
+    this.sendChatMessage('⏸️ 【タイマー一時停止】ゲームの進行を一時停止しました。再開時は「!再開」を押してください。');
+  }
+
+  /**
+   * 仮想人狼ゲームループの再開
+   */
+  public resumeMockGameLoop(): void {
+    this.sendChatMessage('▶️ 【タイマー再開】ゲームを再開しました。議論を続行してください。');
+    // 再開後は昼の議論の続きをスケジューリング
+    const schedule = (fn: () => void, delayMs: number) => {
+      const t = setTimeout(fn, delayMs);
+      this.mockTimeouts.push(t);
+    };
+    schedule(() => {
+      this.sendMockUserChat('Bob', '議論再開ですね！改めてAliceさんとDaveさんの主張を比較しましょう。');
+    }, 2000);
+    schedule(() => {
+      this.sendChatMessage('🗳️ 【投票アナウンス】議論時間が終了しました。これより処刑投票に移ります。');
+    }, 6000);
+    schedule(() => {
+      this.executeMockExecution();
+    }, 11000);
+  }
+
+  /**
+   * 仮想人狼ゲームのシナリオ実行ループ
+   */
+  public startMockGameLoop(): void {
+    if (!this.status.isMockMode || this.status.participants.length === 0) return;
+    this.clearMockTimeouts();
+    this.mockGameRunning = true;
+
+    const schedule = (fn: () => void, delayMs: number) => {
+      const t = setTimeout(fn, delayMs);
+      this.mockTimeouts.push(t);
+    };
+
+    // 1. 役職配布
+    const participants = this.status.participants;
+    // 役職割り当て（Alice: 人狼, Frank: 人狼, Dave: 占い師, Grace: 霊媒師, Henry: 騎士, 他: 市民）
+    participants.forEach((p, idx) => {
+      p.isAlive = true;
+      p.isMuted = false;
+      p.breakoutRoomId = 'main';
+      p.currentRoomName = '🏠 メインルーム';
+
+      if (p.userName.includes('Alice')) p.role = '人狼';
+      else if (p.userName.includes('Frank')) p.role = '人狼';
+      else if (p.userName.includes('Dave')) p.role = '占い師';
+      else if (p.userName.includes('Grace')) p.role = '霊媒師';
+      else if (p.userName.includes('Henry')) p.role = '騎士';
+      else if (p.userName.includes('Ivy')) p.role = '狂人';
+      else p.role = '市民';
+    });
+
+    this.sendChatMessage('🐺 【ゲーム開始】人狼ゲームを開始します！全員に役職が配布されました。画面の役職表示をご確認ください。');
+    this.sendChatMessage('📜 【配当一覧】人狼 2名, 占い師 1名, 霊媒師 1名, 騎士 1名, 市民陣営。夜の行動に備えてください。');
+    this.emit('statusChange', this.status);
+
+    // 2. 1日目・夜フェーズ (+4秒)
+    schedule(async () => {
+      this.sendChatMessage('🌙 【1日目・夜】恐ろしい夜がやってきました。全員目を閉じてください。各能力者はブレイクアウトルームへ移動します。');
+      
+      const assignments: Record<string, string> = {};
+      participants.forEach(p => {
+        if (p.role === '人狼') assignments[p.userId] = 'wolf';
+        else if (p.role === '占い師') assignments[p.userId] = 'room_seer';
+        else if (p.role === '霊媒師') assignments[p.userId] = 'room_medium';
+        else if (p.role === '騎士') assignments[p.userId] = 'room_knight';
+        else assignments[p.userId] = 'main';
+      });
+      await this.assignBreakoutRooms(assignments);
+    }, 4000);
+
+    // 3. 夜の密談・能力実行 (+8秒)
+    schedule(() => {
+      this.sendMockUserChat('Alice', '🐺 【人狼の部屋】誰を襲撃しますか？Charlieさんが静かなので狙い目ですね。');
+    }, 8000);
+
+    schedule(() => {
+      this.sendMockUserChat('Frank', '🐺 【人狼の部屋】賛成！Charlieさんを襲撃対象に指定します。');
+    }, 10000);
+
+    schedule(() => {
+      this.sendMockUserChat('Dave', '🔮 【占い師の部屋】Bobさんを占います。');
+      this.sendChatMessage('🔮 【占い結果】Bob さんは【⚪ 人間（市民）】でした！');
+    }, 12000);
+
+    // 4. 1日目・朝フェーズ (+15秒)
+    schedule(async () => {
+      this.sendChatMessage('☀️ 【1日目・朝】朝がやってきました！全員メインルームにお戻りください。');
+      
+      // 全員メインルームへ帰還
+      const returnAssignments: Record<string, string> = {};
+      participants.forEach(p => { returnAssignments[p.userId] = 'main'; });
+      await this.assignBreakoutRooms(returnAssignments);
+    }, 15000);
+
+    // 5. 犠牲者発表・Charlie霊界移動 (+18秒)
+    schedule(() => {
+      this.sendChatMessage('🩸 昨晩の無残な犠牲者は…… Charlie さんでした。');
+      const charlie = participants.find(p => p.userName.includes('Charlie'));
+      if (charlie) {
+        charlie.isAlive = false;
+        charlie.breakoutRoomId = 'ghost';
+        charlie.currentRoomName = '👻 霊界';
+        charlie.isMuted = true;
+      }
+      this.sendChatMessage('👻 Charlie さんは霊界（ゴーストルーム）へ移動し、マイクが自動ミュートされました。');
+      this.emit('statusChange', this.status);
+    }, 18000);
+
+    // 6. 1日目・昼の議論開始 (+22秒)
+    schedule(() => {
+      this.sendChatMessage('🗣️ 【昼の議論開始】制限時間は2分間です。怪しい人物について話し合ってください。（タイマー作動中）');
+    }, 22000);
+
+    // 7. 議論チャット
+    schedule(() => {
+      this.sendMockUserChat('Dave', '皆さん！昨晩Bobさんを占って【白（人間）】でした！私は本物の占い師です！');
+    }, 24500);
+
+    schedule(() => {
+      this.sendMockUserChat('Bob', 'Daveさん占いありがとうございます！自分は間違いなく市民です！');
+    }, 27000);
+
+    schedule(() => {
+      this.sendMockUserChat('Alice', 'ちょっと待ってください！私も占い師です！昨晩Bobさんを占ったら【黒（人狼）】が出ました！Daveさんは人狼の騙りです！');
+    }, 29500);
+
+    schedule(() => {
+      this.sendMockUserChat('Elena', 'ええっ！？占い師が2人出た！？Bobさんの白黒判定が真っ向から割れてる…！');
+    }, 32000);
+
+    schedule(() => {
+      this.sendMockUserChat('Frank', 'Aliceさんのほうが堂々としてて本物に見えるけどな。Daveさん怪しくないか？');
+    }, 34500);
+
+    schedule(() => {
+      this.sendMockUserChat('Henry', '初日から対抗占いか。霊媒結果もまだないし、今日は2人の発言の違和感を精査しよう。');
+    }, 37000);
+
+    // 8. 投票アナウンス (+41秒)
+    schedule(() => {
+      this.sendChatMessage('🗳️ 【投票アナウンス】議論時間が終了しました。これより処刑投票に移ります。各自、怪しいと思う人物に投票してください。');
+    }, 41000);
+
+    // 9. 処刑実行 (+46秒)
+    schedule(() => {
+      this.executeMockExecution();
+    }, 46000);
+  }
+
+  /**
+   * 仮想シミュレータ処刑の実行ルーチン
+   */
+  private executeMockExecution(): void {
+    const participants = this.status.participants;
+    this.sendChatMessage('⚖️ 【処刑投票結果】投票の結果、最多得票の Alice さんが処刑されることになりました。');
+    const alice = participants.find(p => p.userName.includes('Alice'));
+    if (alice) {
+      alice.isAlive = false;
+      alice.breakoutRoomId = 'ghost';
+      alice.currentRoomName = '👻 霊界';
+      alice.isMuted = true;
+    }
+    this.sendChatMessage('👻 Alice さんは霊界へ移動し、マイクが自動ミュートされました。');
+    this.emit('statusChange', this.status);
+
+    const schedule = (fn: () => void, delayMs: number) => {
+      const t = setTimeout(fn, delayMs);
+      this.mockTimeouts.push(t);
+    };
+
+    schedule(() => {
+      this.sendChatMessage('🔮 【霊媒結果】Grace さんによる霊媒結果: 処刑された Alice さんは【🐺 人狼】でした！市民陣営リード！');
+      this.sendChatMessage('🎉 【テスト完了】人狼1名の追放に成功しました！Zoom連携の役職配布、部屋自動移動、ミュート、アナウンスのシミュレーション検証は正常に終了しました。もう一度テストする場合は「!開始」をクリックしてください。');
+      this.mockGameRunning = false;
+    }, 4000);
+  }
+
+  /**
    * 仮想参加者からのチャット送信
    */
-  public sendMockUserChat(senderUserId: string, message: string): void {
-    const p = this.status.participants.find(u => u.userId === senderUserId) || this.status.participants[0];
-    const senderName = p ? p.userName : '仮想プレイヤー';
-    this.handleIncomingChatMessage(senderName, message, senderUserId || 'mock_u1');
+  public sendMockUserChat(senderUserIdOrName: string, message: string): void {
+    const p = this.status.participants.find(u => u.userId === senderUserIdOrName || u.userName.includes(senderUserIdOrName)) || this.status.participants[0];
+    const senderName = p ? p.userName : senderUserIdOrName;
+    this.handleIncomingChatMessage(senderName, message, p ? p.userId : 'mock_u1');
   }
 
   /**

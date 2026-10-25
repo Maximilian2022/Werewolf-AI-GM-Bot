@@ -1346,21 +1346,90 @@ function setupZoomHandlers() {
     });
   }
 
+  // 音声読み上げトグル
+  const toggleVoiceBtn = document.getElementById('btn-toggle-gm-voice');
+  if (toggleVoiceBtn) {
+    toggleVoiceBtn.addEventListener('click', () => {
+      gmVoiceEnabled = !gmVoiceEnabled;
+      toggleVoiceBtn.textContent = gmVoiceEnabled ? '🔊 GM音声: ON' : '🔇 GM音声: OFF';
+      toggleVoiceBtn.style.color = gmVoiceEnabled ? '#34d399' : '#94a3b8';
+      toggleVoiceBtn.style.borderColor = gmVoiceEnabled ? 'rgba(52,211,153,0.4)' : 'rgba(148,163,184,0.3)';
+      toggleVoiceBtn.style.background = gmVoiceEnabled ? 'rgba(52,211,153,0.15)' : 'rgba(148,163,184,0.1)';
+      if (!gmVoiceEnabled && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    });
+  }
+
   // ゲーム開始
   const startGameBtn = document.getElementById('btn-zoom-start-game');
   if (startGameBtn) {
     startGameBtn.addEventListener('click', async () => {
-      const regId = document.getElementById('zoom-game-reg-select').value;
-      if (!confirm('Zoom人狼ゲームを開始しますか？')) return;
       try {
+        startGameBtn.disabled = true;
+        // ブラウザの音声再生コンテキストをアンロック
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.resume();
+        }
         await fetch('/api/zoom/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: '!開始' })
         });
-        alert('ゲーム開始コマンドを送信しました！');
+        await fetchZoomStatus();
       } catch (err) {
         alert('開始エラー: ' + err.message);
+      } finally {
+        setTimeout(() => { startGameBtn.disabled = false; }, 1000);
+      }
+    });
+  }
+
+  // 一時停止
+  const pauseGameBtn = document.getElementById('btn-zoom-pause-game');
+  if (pauseGameBtn) {
+    pauseGameBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/zoom/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: '!一時停止' })
+        });
+        await fetchZoomStatus();
+      } catch (err) {
+        console.error('一時停止エラー:', err);
+      }
+    });
+  }
+
+  // ミュート一括制御
+  const muteAllBtn = document.getElementById('btn-zoom-mute-all');
+  if (muteAllBtn) {
+    muteAllBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/zoom/mute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target: 'all', muted: true })
+        });
+        await fetchZoomStatus();
+      } catch (err) {
+        console.error('全員ミュートエラー:', err);
+      }
+    });
+  }
+  const unmuteAllBtn = document.getElementById('btn-zoom-unmute-all');
+  if (unmuteAllBtn) {
+    unmuteAllBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/zoom/mute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target: 'all', muted: false })
+        });
+        await fetchZoomStatus();
+      } catch (err) {
+        console.error('全員ミュート解除エラー:', err);
       }
     });
   }
@@ -1411,6 +1480,9 @@ function setupZoomHandlers() {
 
   const sendMockCmd = async (message) => {
     try {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.resume();
+      }
       await fetch('/api/zoom/mock/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1438,7 +1510,7 @@ function setupZoomHandlers() {
         fetchZoomStatus();
         populateZoomRegulations();
         if (!state.zoomPollingInterval) {
-          state.zoomPollingInterval = setInterval(fetchZoomStatus, 4000);
+          state.zoomPollingInterval = setInterval(fetchZoomStatus, 2000);
         }
       } else {
         if (state.zoomPollingInterval) {
@@ -1566,6 +1638,38 @@ function renderZoomStatus(status) {
     if (sendChatBtn) sendChatBtn.disabled = true;
   }
 
+// ==========================================
+// Zoom GM ブラウザ音声合成 (Web Speech API)
+// ==========================================
+let lastSpokenChatId = null;
+let gmVoiceEnabled = true;
+
+function speakGMAudio(text) {
+  if (!gmVoiceEnabled || !('speechSynthesis' in window)) return;
+  // 絵文字や装飾記号を取り除き、聞き取りやすいテキストに整形
+  const cleanText = text
+    .replace(/[🐺🌙☀️🩸👻🗣️🗳️⚖️🎉📜🔮🛡️⚪⚫👑🛡️👤🔇🎙️⚠️🧪🚪🏠]/g, '')
+    .replace(/【.*?】/g, '')
+    .replace(/http[^\s]+/g, '')
+    .trim();
+
+  if (!cleanText) return;
+
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = 'ja-JP';
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const jaVoice = voices.find(v => v.lang === 'ja-JP' || v.lang.startsWith('ja'));
+    if (jaVoice) utterance.voice = jaVoice;
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.warn('GM音声合成エラー:', err);
+  }
+}
+
   // 参加者一覧
   const pList = document.getElementById('zoom-participant-list') || document.getElementById('zoom-participants-list');
   if (pList) {
@@ -1584,12 +1688,19 @@ function renderZoomStatus(status) {
         item.style.background = 'rgba(255, 255, 255, 0.03)';
         item.style.borderRadius = '6px';
 
+        let roleBadge = '';
+        if (p.role) {
+          const roleColor = p.role === '人狼' ? 'var(--danger)' : (p.role === '市民' ? '#94a3b8' : 'var(--accent)');
+          roleBadge = `<span class="badge" style="background: rgba(255, 255, 255, 0.08); color: ${roleColor}; font-size: 0.72rem; margin-left: 6px; border: 1px solid rgba(255,255,255,0.15);">🎭 ${escapeHtml(p.role)}</span>`;
+        }
         const roomBadge = p.currentRoomName ? `<span class="badge badge-secondary" style="font-size: 0.75rem; margin-left: 6px;">${escapeHtml(p.currentRoomName)}</span>` : '';
+        const isDead = p.isAlive === false;
 
         item.innerHTML = `
-          <div>
-            ${p.isHost ? '👑 ' : (p.isCoHost ? '🛡️ ' : '👤 ')}
+          <div style="${isDead ? 'opacity: 0.45; text-decoration: line-through;' : ''}">
+            ${isDead ? '💀 ' : (p.isHost ? '👑 ' : (p.isCoHost ? '🛡️ ' : '👤 '))}
             <strong>${escapeHtml(p.userName)}</strong>
+            ${roleBadge}
             ${roomBadge}
           </div>
           <div>
@@ -1609,6 +1720,15 @@ function renderZoomStatus(status) {
     if (status.chatLogs.length === 0) {
       chatBox.innerHTML = '<div class="text-muted text-center py-3">チャットログがここにリアルタイム表示されます</div>';
     } else {
+      // 最新のGMメッセージを検知してブラウザ音声読み上げ
+      const latestMsg = status.chatLogs[0];
+      if (latestMsg && latestMsg.id !== lastSpokenChatId) {
+        if (lastSpokenChatId !== null && (latestMsg.sender.includes('人狼GM') || latestMsg.sender.includes('Bot'))) {
+          speakGMAudio(latestMsg.message);
+        }
+        lastSpokenChatId = latestMsg.id;
+      }
+
       chatBox.innerHTML = '';
       status.chatLogs.forEach(c => {
         const msgDiv = document.createElement('div');
