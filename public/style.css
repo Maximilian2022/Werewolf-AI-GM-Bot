@@ -1435,3 +1435,10 @@ body {
   line-height: 1.5;
 }
 
+.btn-xs {
+  font-size: 0.76rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+}
+
+

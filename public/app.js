@@ -1366,12 +1366,14 @@ function setupZoomHandlers() {
   }
 
   // 仮想シミュレータ (Mockモード) 制御
-  const startMockBtn = document.getElementById('btn-start-zoom-mock');
-  const stopMockBtn = document.getElementById('btn-stop-zoom-mock');
+  const startMockBtn = document.getElementById('btn-start-zoom-mock') || document.getElementById('btn-zoom-sim-start');
+  const stopMockBtn = document.getElementById('btn-stop-zoom-mock') || document.getElementById('btn-zoom-sim-stop');
   if (startMockBtn) {
     startMockBtn.addEventListener('click', async () => {
-      const count = document.getElementById('zoom-mock-count').value;
+      const countSelect = document.getElementById('zoom-mock-count') || document.getElementById('zoom-sim-count');
+      const count = countSelect ? countSelect.value : 7;
       startMockBtn.disabled = true;
+      startMockBtn.textContent = '⏳ 起動中...';
       try {
         const res = await fetch('/api/zoom/mock/start', {
           method: 'POST',
@@ -1388,6 +1390,7 @@ function setupZoomHandlers() {
         alert('通信エラー: ' + err.message);
       } finally {
         startMockBtn.disabled = false;
+        startMockBtn.textContent = '起動';
       }
     });
   }
@@ -1471,19 +1474,25 @@ async function fetchZoomStatus() {
 }
 
 function renderZoomStatus(status) {
+  if (!status) return;
   const badge = document.getElementById('zoom-status-badge');
   const joinBtn = document.getElementById('btn-zoom-join');
   const leaveBtn = document.getElementById('btn-zoom-leave');
-  const meetingSpan = document.getElementById('zoom-current-meeting');
-  const hostSpan = document.getElementById('zoom-host-status');
-  const roomSpan = document.getElementById('zoom-current-room');
+  const meetingSpan = document.getElementById('zoom-current-meeting') || document.getElementById('zoom-live-meeting-num');
+  const hostSpan = document.getElementById('zoom-host-status') || document.getElementById('zoom-live-host-status');
+  const roomSpan = document.getElementById('zoom-current-room') || document.getElementById('zoom-live-current-room');
   const countSpan = document.getElementById('zoom-participant-count');
   const startGameBtn = document.getElementById('btn-zoom-start-game');
+  const pauseGameBtn = document.getElementById('btn-zoom-pause-game');
+  const muteAllBtn = document.getElementById('btn-zoom-mute-all');
+  const unmuteAllBtn = document.getElementById('btn-zoom-unmute-all');
+  const chatInput = document.getElementById('zoom-chat-input');
+  const sendChatBtn = document.getElementById('btn-send-zoom-chat');
 
   // シミュレータバッジとコントロール
   const mockBadge = document.getElementById('zoom-mock-badge');
-  const btnStartMock = document.getElementById('btn-start-zoom-mock');
-  const btnStopMock = document.getElementById('btn-stop-zoom-mock');
+  const btnStartMock = document.getElementById('btn-start-zoom-mock') || document.getElementById('btn-zoom-sim-start');
+  const btnStopMock = document.getElementById('btn-stop-zoom-mock') || document.getElementById('btn-zoom-sim-stop');
   const mockControls = document.getElementById('zoom-mock-controls');
 
   if (status.isMockMode) {
@@ -1499,39 +1508,66 @@ function renderZoomStatus(status) {
   }
 
   if (status.isConnected) {
-    badge.textContent = status.isMockMode ? '🧪 仮想シミュレーション中' : '接続中 (入室完了)';
-    badge.className = status.isMockMode ? 'badge badge-warning' : 'badge badge-success';
-    joinBtn.style.display = 'none';
-    leaveBtn.style.display = status.isMockMode ? 'none' : 'inline-block';
-    meetingSpan.textContent = status.meetingNumber || '接続中';
-    hostSpan.innerHTML = status.isHostOrCoHost
-      ? '<span style="color:#34d399;">🛡️ 共同ホスト (操作可能)</span>'
-      : '<span style="color:#fbbf24;">⚠️ 一般参加者 (主催者が共同ホストにしてください)</span>';
-    roomSpan.textContent = status.currentRoom || 'メインルーム';
-    countSpan.textContent = `${status.participants ? status.participants.length : 0} 人`;
+    if (badge) {
+      badge.textContent = status.isMockMode ? '🧪 仮想シミュレーション中' : '接続中 (入室完了)';
+      badge.className = status.isMockMode ? 'badge badge-warning' : 'badge badge-success';
+    }
+    if (joinBtn) joinBtn.style.display = 'none';
+    if (leaveBtn) leaveBtn.style.display = status.isMockMode ? 'none' : 'inline-block';
+    if (meetingSpan) meetingSpan.textContent = status.meetingNumber || '接続中';
+    if (hostSpan) {
+      hostSpan.innerHTML = status.isHostOrCoHost
+        ? '<span style="color:#34d399;">🛡️ 共同ホスト (操作可能)</span>'
+        : '<span style="color:#fbbf24;">⚠️ 一般参加者 (主催者が共同ホストにしてください)</span>';
+    }
+    if (roomSpan) roomSpan.textContent = status.currentRoom || 'メインルーム';
+    if (countSpan) countSpan.textContent = `${status.participants ? status.participants.length : 0}`;
     if (startGameBtn) startGameBtn.disabled = false;
+    if (pauseGameBtn) pauseGameBtn.disabled = false;
+    if (muteAllBtn) muteAllBtn.disabled = false;
+    if (unmuteAllBtn) unmuteAllBtn.disabled = false;
+    if (chatInput) chatInput.disabled = false;
+    if (sendChatBtn) sendChatBtn.disabled = false;
   } else if (status.isConnecting) {
-    badge.textContent = '接続試行中...';
-    badge.className = 'badge badge-warning';
-    joinBtn.style.display = 'inline-block';
-    joinBtn.disabled = true;
-    leaveBtn.style.display = 'none';
+    if (badge) {
+      badge.textContent = '接続試行中...';
+      badge.className = 'badge badge-warning';
+    }
+    if (joinBtn) {
+      joinBtn.style.display = 'inline-block';
+      joinBtn.disabled = true;
+    }
+    if (leaveBtn) leaveBtn.style.display = 'none';
     if (startGameBtn) startGameBtn.disabled = true;
+    if (pauseGameBtn) pauseGameBtn.disabled = true;
+    if (muteAllBtn) muteAllBtn.disabled = true;
+    if (unmuteAllBtn) unmuteAllBtn.disabled = true;
+    if (chatInput) chatInput.disabled = true;
+    if (sendChatBtn) sendChatBtn.disabled = true;
   } else {
-    badge.textContent = '未接続';
-    badge.className = 'badge badge-secondary';
-    joinBtn.style.display = 'inline-block';
-    joinBtn.disabled = false;
-    leaveBtn.style.display = 'none';
-    meetingSpan.textContent = '未接続';
-    hostSpan.textContent = '未取得';
-    roomSpan.textContent = 'メインルーム';
-    countSpan.textContent = '0 人';
+    if (badge) {
+      badge.textContent = '未接続';
+      badge.className = 'badge badge-secondary';
+    }
+    if (joinBtn) {
+      joinBtn.style.display = 'inline-block';
+      joinBtn.disabled = false;
+    }
+    if (leaveBtn) leaveBtn.style.display = 'none';
+    if (meetingSpan) meetingSpan.textContent = '-';
+    if (hostSpan) hostSpan.innerHTML = '❌ なし (未接続)';
+    if (roomSpan) roomSpan.textContent = 'メインルーム';
+    if (countSpan) countSpan.textContent = '0';
     if (startGameBtn) startGameBtn.disabled = true;
+    if (pauseGameBtn) pauseGameBtn.disabled = true;
+    if (muteAllBtn) muteAllBtn.disabled = true;
+    if (unmuteAllBtn) unmuteAllBtn.disabled = true;
+    if (chatInput) chatInput.disabled = true;
+    if (sendChatBtn) sendChatBtn.disabled = true;
   }
 
   // 参加者一覧
-  const pList = document.getElementById('zoom-participant-list');
+  const pList = document.getElementById('zoom-participant-list') || document.getElementById('zoom-participants-list');
   if (pList) {
     if (!status.participants || status.participants.length === 0) {
       pList.innerHTML = '<div class="text-muted text-center py-3">Botがミーティングに参加すると一覧が表示されます</div>';

@@ -872,21 +872,32 @@
 
               <!-- 仮想シミュレータ (デバッグモード) -->
               <div class="mt-4 pt-3 border-top" style="border-color: var(--border-color) !important;">
-                <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex justify-content-between align-items-center mb-2">
                   <div>
                     <h5 class="text-sm font-bold mb-0">🧪 仮想シミュレータ (テスト用)</h5>
                     <span class="text-muted text-xs">実際のZoomなしでUI動作・部屋移動を検証できます</span>
                   </div>
                   <div class="d-flex gap-1 align-items-center">
-                    <select id="zoom-sim-count" class="form-select form-select-sm" style="width: 80px;">
+                    <select id="zoom-mock-count" class="form-select form-select-sm" style="width: 80px;">
                       <option value="5">5名</option>
                       <option value="7" selected>7名</option>
                       <option value="9">9名</option>
                       <option value="11">11名</option>
                       <option value="13">13名</option>
                     </select>
-                    <button type="button" class="btn btn-outline-info btn-sm" id="btn-zoom-sim-start">起動</button>
-                    <button type="button" class="btn btn-outline-danger btn-sm" id="btn-zoom-sim-stop" style="display: none;">停止</button>
+                    <button type="button" class="btn btn-outline-info btn-sm" id="btn-start-zoom-mock">起動</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="btn-stop-zoom-mock" style="display: none;">停止</button>
+                  </div>
+                </div>
+
+                <!-- シミュレータ稼働時クイックアクション -->
+                <div id="zoom-mock-controls" style="display: none; background: rgba(255,255,255,0.03); padding: 8px; border-radius: 6px; border: 1px dashed var(--border-color);">
+                  <div class="text-xs text-muted mb-1">仮想参加者からのチャット送信テスト:</div>
+                  <div class="d-flex gap-1 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-xs" id="btn-mock-cmd-start">💬 !開始</button>
+                    <button type="button" class="btn btn-secondary btn-xs" id="btn-mock-cmd-pause">💬 !一時停止</button>
+                    <button type="button" class="btn btn-secondary btn-xs" id="btn-mock-cmd-resume">💬 !再開</button>
+                    <button type="button" class="btn btn-secondary btn-xs" id="btn-mock-cmd-help">💬 !ヘルプ</button>
                   </div>
                 </div>
               </div>
