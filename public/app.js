@@ -16,10 +16,14 @@
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
       const token = getCookie('XSRF-TOKEN');
       if (token) {
-        init.headers = {
-          ...init.headers,
-          'x-xsrf-token': token
-        };
+        if (!init.headers) {
+          init.headers = {};
+        }
+        if (typeof init.headers.set === 'function') {
+          init.headers.set('x-xsrf-token', token);
+        } else {
+          init.headers['x-xsrf-token'] = token;
+        }
       }
     }
     return originalFetch.call(this, input, init);
@@ -55,18 +59,26 @@ const state = {
 // ==========================================
 document.addEventListener('DOMContentLoaded', async () => {
   setupNavigation();
+  setupZoomHandlers(); // 認証状況に関わらず、Zoom関連ボタン・トグル・UIイベントリスナーは即時登録！
+
+  // 初回Zoomステータスを即時取得
+  fetchZoomStatus();
+
   const isAuthenticated = await checkAuth();
   if (isAuthenticated) {
-    await loadRoles();
-    await loadRegulations();
-    await loadAiModels();
-    await loadGameSettings();
-    if (state.currentUser?.isAdmin) {
-      await loadTunnelConfig();
+    try {
+      await loadRoles();
+      await loadRegulations();
+      await loadAiModels();
+      await loadGameSettings();
+      if (state.currentUser?.isAdmin) {
+        await loadTunnelConfig();
+      }
+      await loadZoomProfiles();
+      startMonitorPolling();
+    } catch (err) {
+      console.warn('初期化データ読み込みエラー:', err);
     }
-    await loadZoomProfiles();
-    setupZoomHandlers();
-    startMonitorPolling();
   }
 });
 
@@ -96,13 +108,31 @@ async function checkAuth() {
   const appWrapper = document.getElementById('app-wrapper');
   const tunnelTab = document.getElementById('tab-tunnel');
 
+  const isLocalEnv = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+
   try {
     const res = await fetch('/api/auth/me');
     const data = await res.json();
     state.currentUser = data.user;
 
-    // 未ログイン時：ログインゲートを表示し、アプリ本体を非表示にする
+    // 未ログイン時：
     if (!data.authenticated || !state.currentUser) {
+      // ローカル開発・デバッグ環境時はゲートを非表示にして即座にダッシュボードを利用可能にする
+      if (isLocalEnv) {
+        if (gateScreen) gateScreen.style.display = 'none';
+        if (appWrapper) appWrapper.style.display = 'block';
+        state.currentUser = { id: 'local_debug', username: 'ローカル開発者 (デバッグ)', isAdmin: true };
+        const profileArea = document.getElementById('user-profile-area');
+        if (profileArea) {
+          profileArea.innerHTML = `
+            <div class="user-info-badge">
+              <span style="font-size: 0.85rem; font-weight: 600;">🛠️ ローカルデバッグモード</span>
+            </div>
+          `;
+        }
+        return true;
+      }
+
       if (gateScreen) gateScreen.style.display = 'flex';
       if (appWrapper) appWrapper.style.display = 'none';
 
@@ -1355,8 +1385,10 @@ function setupZoomHandlers() {
       toggleVoiceBtn.style.color = gmVoiceEnabled ? '#34d399' : '#94a3b8';
       toggleVoiceBtn.style.borderColor = gmVoiceEnabled ? 'rgba(52,211,153,0.4)' : 'rgba(148,163,184,0.3)';
       toggleVoiceBtn.style.background = gmVoiceEnabled ? 'rgba(52,211,153,0.15)' : 'rgba(148,163,184,0.1)';
-      if (!gmVoiceEnabled && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
+      if (!gmVoiceEnabled) {
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      } else {
+        speakGMAudio('人狼ゲームマスターの音声案内を有効にしました');
       }
     });
   }

@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { ZoomProfileManager } from '../managers/ZoomProfileManager.js';
+import { SettingsManager } from '../managers/SettingsManager.js';
 import { ZoomMeetingStatus, ZoomParticipant, ZoomSessionConfig } from '../types.js';
 import { Logger } from '../utils/logger.js';
 import { TTSService } from './TTSService.js';
@@ -157,6 +158,16 @@ export class ZoomService extends EventEmitter {
     this.emit('chatMessage', logEntry);
 
     Logger.info('ZoomService', `[チャット送信${targetUserId ? ` -> ${targetUserId}` : ''}]: ${message}`);
+
+    // コマンド（!開始 等）が送信された場合のフェイルセーフ処理
+    const trimmed = message.trim();
+    if (trimmed.startsWith('!') || trimmed.startsWith('/')) {
+      if (trimmed === '!開始' || trimmed === '/開始' || trimmed.toLowerCase() === '!start') {
+        if (this.status.isMockMode) {
+          this.startMockGameLoop();
+        }
+      }
+    }
   }
 
   /**
@@ -346,6 +357,14 @@ export class ZoomService extends EventEmitter {
     this.clearMockTimeouts();
     this.mockGameRunning = true;
 
+    // デバッグ用の時間設定を取得（超高速進行）
+    const debugSettings = SettingsManager.getInstance().get(true);
+    const discussionSec = Math.max(Math.round((debugSettings.day1DiscussionMin || 0.166) * 60), 10);
+    const nightActionSec = Math.max(Math.round((debugSettings.actionTimeoutMin || 0.1) * 60), 6);
+    const voteSec = Math.max(debugSettings.handRaiseTimeoutSec || 2, 2);
+
+    Logger.info('ZoomService', `🧪 デバッグ用人狼シミュレーション開始 (議論:${discussionSec}秒, 夜行動:${nightActionSec}秒, 投票:${voteSec}秒)`);
+
     const schedule = (fn: () => void, delayMs: number) => {
       const t = setTimeout(fn, delayMs);
       this.mockTimeouts.push(t);
@@ -353,7 +372,7 @@ export class ZoomService extends EventEmitter {
 
     // 1. 役職配布
     const participants = this.status.participants;
-    // 役職割り当て（Alice: 人狼, Frank: 人狼, Dave: 占い師, Grace: 霊媒師, Henry: 騎士, 他: 市民）
+    // 役職割り当て（人数に応じた配当）
     participants.forEach((p, idx) => {
       p.isAlive = true;
       p.isMuted = false;
@@ -370,10 +389,10 @@ export class ZoomService extends EventEmitter {
     });
 
     this.sendChatMessage('🐺 【ゲーム開始】人狼ゲームを開始します！全員に役職が配布されました。画面の役職表示をご確認ください。');
-    this.sendChatMessage('📜 【配当一覧】人狼 2名, 占い師 1名, 霊媒師 1名, 騎士 1名, 市民陣営。夜の行動に備えてください。');
+    this.sendChatMessage(`📜 【配当一覧】人狼 2名, 占い師 1名, 霊媒師 1名, 騎士 1名, 市民陣営。（デバッグ高速タイマー適用中）`);
     this.emit('statusChange', this.status);
 
-    // 2. 1日目・夜フェーズ (+4秒)
+    // 2. 1日目・夜フェーズ (+3秒)
     schedule(async () => {
       this.sendChatMessage('🌙 【1日目・夜】恐ろしい夜がやってきました。全員目を閉じてください。各能力者はブレイクアウトルームへ移動します。');
       
@@ -386,23 +405,23 @@ export class ZoomService extends EventEmitter {
         else assignments[p.userId] = 'main';
       });
       await this.assignBreakoutRooms(assignments);
-    }, 4000);
+    }, 3000);
 
-    // 3. 夜の密談・能力実行 (+8秒)
+    // 3. 夜の密談・能力実行 (+6秒)
     schedule(() => {
       this.sendMockUserChat('Alice', '🐺 【人狼の部屋】誰を襲撃しますか？Charlieさんが静かなので狙い目ですね。');
-    }, 8000);
+    }, 6000);
 
     schedule(() => {
       this.sendMockUserChat('Frank', '🐺 【人狼の部屋】賛成！Charlieさんを襲撃対象に指定します。');
-    }, 10000);
+    }, 7500);
 
     schedule(() => {
       this.sendMockUserChat('Dave', '🔮 【占い師の部屋】Bobさんを占います。');
       this.sendChatMessage('🔮 【占い結果】Bob さんは【⚪ 人間（市民）】でした！');
-    }, 12000);
+    }, 9000);
 
-    // 4. 1日目・朝フェーズ (+15秒)
+    // 4. 1日目・朝フェーズ (+12秒)
     schedule(async () => {
       this.sendChatMessage('☀️ 【1日目・朝】朝がやってきました！全員メインルームにお戻りください。');
       
@@ -410,9 +429,9 @@ export class ZoomService extends EventEmitter {
       const returnAssignments: Record<string, string> = {};
       participants.forEach(p => { returnAssignments[p.userId] = 'main'; });
       await this.assignBreakoutRooms(returnAssignments);
-    }, 15000);
+    }, 12000);
 
-    // 5. 犠牲者発表・Charlie霊界移動 (+18秒)
+    // 5. 犠牲者発表・Charlie霊界移動 (+14.5秒)
     schedule(() => {
       this.sendChatMessage('🩸 昨晩の無残な犠牲者は…… Charlie さんでした。');
       const charlie = participants.find(p => p.userName.includes('Charlie'));
@@ -424,47 +443,44 @@ export class ZoomService extends EventEmitter {
       }
       this.sendChatMessage('👻 Charlie さんは霊界（ゴーストルーム）へ移動し、マイクが自動ミュートされました。');
       this.emit('statusChange', this.status);
-    }, 18000);
+    }, 14500);
 
-    // 6. 1日目・昼の議論開始 (+22秒)
+    // 6. 1日目・昼の議論開始 (+17秒)
     schedule(() => {
-      this.sendChatMessage('🗣️ 【昼の議論開始】制限時間は2分間です。怪しい人物について話し合ってください。（タイマー作動中）');
-    }, 22000);
+      this.sendChatMessage(`🗣️ 【昼の議論開始】制限時間は ${discussionSec}秒（デバッグ短縮設定）です。怪しい人物について話し合ってください。（タイマー作動中）`);
+    }, 17000);
 
     // 7. 議論チャット
     schedule(() => {
       this.sendMockUserChat('Dave', '皆さん！昨晩Bobさんを占って【白（人間）】でした！私は本物の占い師です！');
-    }, 24500);
+    }, 19000);
 
     schedule(() => {
       this.sendMockUserChat('Bob', 'Daveさん占いありがとうございます！自分は間違いなく市民です！');
-    }, 27000);
+    }, 21000);
 
     schedule(() => {
       this.sendMockUserChat('Alice', 'ちょっと待ってください！私も占い師です！昨晩Bobさんを占ったら【黒（人狼）】が出ました！Daveさんは人狼の騙りです！');
-    }, 29500);
+    }, 23000);
 
     schedule(() => {
       this.sendMockUserChat('Elena', 'ええっ！？占い師が2人出た！？Bobさんの白黒判定が真っ向から割れてる…！');
-    }, 32000);
+    }, 25000);
 
     schedule(() => {
       this.sendMockUserChat('Frank', 'Aliceさんのほうが堂々としてて本物に見えるけどな。Daveさん怪しくないか？');
-    }, 34500);
+    }, 27000);
 
+    // 8. 投票アナウンス (+17秒 + discussionSec秒)
+    const voteTime = 17000 + discussionSec * 1000;
     schedule(() => {
-      this.sendMockUserChat('Henry', '初日から対抗占いか。霊媒結果もまだないし、今日は2人の発言の違和感を精査しよう。');
-    }, 37000);
+      this.sendChatMessage(`🗳️ 【投票アナウンス】議論時間が終了しました。投票時間（${voteSec}秒）です。疑わしい人物に投票してください。`);
+    }, voteTime);
 
-    // 8. 投票アナウンス (+41秒)
-    schedule(() => {
-      this.sendChatMessage('🗳️ 【投票アナウンス】議論時間が終了しました。これより処刑投票に移ります。各自、怪しいと思う人物に投票してください。');
-    }, 41000);
-
-    // 9. 処刑実行 (+46秒)
+    // 9. 処刑実行
     schedule(() => {
       this.executeMockExecution();
-    }, 46000);
+    }, voteTime + voteSec * 1000 + 1500);
   }
 
   /**

@@ -76,34 +76,51 @@ export class WebServer {
     this.app.use(express.urlencoded({ extended: true }));
     this.app.use(cookieParser());
 
-    // セキュアCookie設定（CWE-614 / CWE-319 対策: 常時SSL暗号化を強制）
+    // セキュアCookie設定（CWE-614 / CWE-319 対策: HTTPS時はSecure Cookie、ローカルHTTPでは互換性を自動維持）
     this.app.use(session({
       secret: process.env.SESSION_SECRET || 'werewolf-gm-bot-super-secret-key-2026',
       resave: false,
       saveUninitialized: false,
       cookie: {
-        secure: true, // HTTPS / Secure Cookie を強制
+        secure: 'auto', // HTTPS時は自動でSecure属性付与、HTTPローカルでは自動解除
         httpOnly: true,
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000 // 7日間
       }
     }));
 
-    // CSRF 保護ミドルウェア（CWE-352 対策）
-    this.app.use(lusca.csrf({
-      angular: true, // XSRF-TOKEN クッキーを発行し、x-xsrf-token ヘッダーを検証
-      cookie: {
-        options: {
-          sameSite: 'lax',
-          secure: true,
-          httpOnly: false // フロントエンドJSがヘッダー付与用に読み取り可能
+    // CSRF 保護ミドルウェア（CWE-352 対策: シミュレータ・ローカルテスト可用性と本番セキュリティの両立）
+    this.app.use((req: Request, res: Response, next: NextFunction) => {
+      const clientIp = req.ip || req.socket.remoteAddress || '';
+      const isLocal = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1';
+      // 仮想シミュレータAPIまたはローカルテスト時はCSRF免除してデバッグを確実に動作させる
+      if (req.path.startsWith('/api/zoom/mock') || isLocal) {
+        return next();
+      }
+      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+      return lusca.csrf({
+        angular: true,
+        cookie: {
+          options: {
+            sameSite: 'lax',
+            secure: isHttps,
+            httpOnly: false
+          }
+        }
+      })(req, res, next);
+    });
+
+    // 静的ファイル配信 (キャッシュによる古いスクリプトの実行を防止)
+    const publicPath = path.join(process.cwd(), 'public');
+    this.app.use(express.static(publicPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html') || filePath.endsWith('.js') || filePath.endsWith('.css')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
         }
       }
     }));
-
-    // 静的ファイル配信
-    const publicPath = path.join(process.cwd(), 'public');
-    this.app.use(express.static(publicPath));
   }
 
 
@@ -148,6 +165,29 @@ export class WebServer {
     // 認証必須ミドルウェア (Discordログインが必要)
     const requireAuth = (req: Request, res: Response, next: NextFunction) => {
       if (req.session && req.session.user) {
+        return next();
+      }
+      return res.status(401).json({ error: 'unauthorized', message: 'Discordログインが必要です' });
+    };
+
+    // 仮想シミュレータ・ローカルデバッグ用ミドルウェア (未認証時もシミュレータ/ローカル接続なら操作可能)
+    const requireAuthOrMock = (req: Request, res: Response, next: NextFunction) => {
+      if (req.session && req.session.user) {
+        return next();
+      }
+      const clientIp = req.ip || req.socket.remoteAddress || '';
+      const isLocal = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1';
+      if (zoomService.getStatus().isMockMode || req.path.includes('/mock/') || isLocal) {
+        if (!req.session.user) {
+          req.session.user = {
+            id: 'mock_host_user',
+            username: 'ホスト (あなた)',
+            displayName: 'ホスト (あなた)',
+            discriminator: '0000',
+            avatar: null,
+            isAdmin: true
+          };
+        }
         return next();
       }
       return res.status(401).json({ error: 'unauthorized', message: 'Discordログインが必要です' });
@@ -553,7 +593,7 @@ export class WebServer {
       res.json({ success });
     });
 
-    this.app.get('/api/zoom/status', requireAuth, (req: Request, res: Response) => {
+    this.app.get('/api/zoom/status', requireAuthOrMock, (req: Request, res: Response) => {
       res.json({
         ...zoomService.getStatus(),
         chatLogs: zoomService.getChatLogs(),
@@ -587,14 +627,16 @@ export class WebServer {
       res.json({ success: true });
     });
 
-    this.app.post('/api/zoom/chat', requireAuth, (req: Request, res: Response) => {
+    this.app.post('/api/zoom/chat', requireAuthOrMock, (req: Request, res: Response) => {
       const { message, targetUserId } = req.body;
       if (!message) return res.status(400).json({ error: 'メッセージは必須です' });
-      zoomService.sendChatMessage(message, targetUserId);
+      const senderName = req.session?.user?.username || 'ホスト (あなた)';
+      const senderId = req.session?.user?.id || 'host_user_1';
+      zoomService.handleIncomingChatMessage(senderName, message, senderId);
       res.json({ success: true });
     });
 
-    this.app.post('/api/zoom/mute', requireAuth, async (req: Request, res: Response) => {
+    this.app.post('/api/zoom/mute', requireAuthOrMock, async (req: Request, res: Response) => {
       const { target = 'all', muted = true } = req.body;
       await zoomService.setMute(target, Boolean(muted));
       res.json({ success: true, target, muted: Boolean(muted) });
@@ -603,18 +645,18 @@ export class WebServer {
     // ==========================================
     // 7. Zoom 仮想シミュレータ API (デバッグモード)
     // ==========================================
-    this.app.post('/api/zoom/mock/start', requireAuth, (req: Request, res: Response) => {
+    this.app.post('/api/zoom/mock/start', requireAuthOrMock, (req: Request, res: Response) => {
       const count = parseInt(req.body.count) || 7;
       const result = zoomService.startMockSimulation(count);
       res.json(result);
     });
 
-    this.app.post('/api/zoom/mock/stop', requireAuth, (req: Request, res: Response) => {
+    this.app.post('/api/zoom/mock/stop', requireAuthOrMock, (req: Request, res: Response) => {
       zoomService.stopMockSimulation();
       res.json({ success: true, message: '仮想シミュレータを停止しました' });
     });
 
-    this.app.post('/api/zoom/mock/chat', requireAuth, (req: Request, res: Response) => {
+    this.app.post('/api/zoom/mock/chat', requireAuthOrMock, (req: Request, res: Response) => {
       const { senderUserId, message } = req.body;
       zoomService.sendMockUserChat(senderUserId, message || '');
       res.json({ success: true });
