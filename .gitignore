@@ -34,6 +34,9 @@ yarn-error.log*
 # 作業用一時フォルダ（外部記憶など）
 scratch/
 
+# エージェント設定・スキル等
+.agents/
+
 # OS・エディタ固有ファイル
 .DS_Store
 Thumbs.db
