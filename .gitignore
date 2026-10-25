@@ -24,8 +24,9 @@ data/
 
 # ログファイル
 *.log
-logs/*.log
-!logs/remediation_history.md
+logs/
+remediation_history.md
+logs/remediation_history.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
